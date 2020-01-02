@@ -235,6 +235,7 @@ def main(datadir, vars, filters, kernels, lr, activation, dr, batch_size, patien
     print(f'Saving model weights: {model_save_fn}')
     model.save_weights(model_save_fn)
 
+
     # Create predictions
     pred = create_iterative_predictions(model, dg_test) if iterative else create_predictions(model, dg_test)
     print(f'Saving predictions: {pred_save_fn}')
