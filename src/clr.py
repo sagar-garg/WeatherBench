@@ -2,8 +2,8 @@ import os
 import numpy as np
 import warnings
 
-from keras.callbacks import Callback
-from keras import backend as K
+from tensorflow.keras.callbacks import Callback
+from tensorflow.keras import backend as K
 
 
 # Code is ported from https://github.com/fastai/fastai
