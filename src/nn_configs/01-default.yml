@@ -1,5 +1,4 @@
-# NN config file
-datadir: /mnt/netdisk1/stephan/5.625deg/
+datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_fn: /home/stephan/data/myWeatherBench/predictions/saved_models/fccnn_3d.h5
 pred_save_fn: /home/stephan/data/myWeatherBench/predictions/fccnn_3d.nc
 vars: [z, t]

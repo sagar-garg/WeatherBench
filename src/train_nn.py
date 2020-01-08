@@ -1,4 +1,4 @@
-from .score import *
+from src.score import *
 import os
 import numpy as np
 import xarray as xr
@@ -148,7 +148,7 @@ def create_iterative_predictions(model, dg, max_lead_time=5 * 24):
     preds = np.array(preds)
 
     lead_time = np.arange(dg.lead_time, max_lead_time + dg.lead_time, dg.lead_time)
-    das = [];
+    das = []
     lev_idx = 0
     for var, levels in dg.var_dict.items():
         if levels is None:
@@ -200,7 +200,7 @@ def main(datadir, vars, filters, kernels, lr, activation, dr, batch_size, patien
     # TODO: Flexible input data
     z = xr.open_mfdataset(f'{datadir}geopotential_500/*.nc', combine='by_coords')
     t = xr.open_mfdataset(f'{datadir}temperature_850/*.nc', combine='by_coords')
-    ds = xr.merge([z, t])
+    ds = xr.merge([z, t], compat='override')
 
     # TODO: Flexible valid split
     ds_train = ds.sel(time=slice(*train_years))
@@ -245,7 +245,7 @@ def main(datadir, vars, filters, kernels, lr, activation, dr, batch_size, patien
     # TODO: Make flexible for other states
     z500_valid = load_test_data(f'{datadir}geopotential_500', 'z')
     t850_valid = load_test_data(f'{datadir}temperature_850', 't')
-    valid = xr.merge([z500_valid, t850_valid])
+    valid = xr.merge([z500_valid, t850_valid], compat='override')
     print(evaluate_iterative_forecast(pred, valid).load() if iterative else compute_weighted_rmse(pred, valid).load())
 
 if __name__ == '__main__':
