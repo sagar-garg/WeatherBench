@@ -1,0 +1,12 @@
+exp_id: 02-6h_subsample
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/stephan/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [500]), 'temperature': ('t', [850])}
+filters: [64, 64, 64, 64, 2]
+kernels: [5, 5, 5, 5, 5]
+lead_time: 72
+lr: 1e-4
+epochs: 900
+norm_subsample: 10000
+data_subsample: 6
