@@ -1,6 +1,7 @@
 from src.score import *
 from src.data_generator import *
 from src.networks import *
+from src.utils import *
 import os
 import ast, re
 import numpy as np
@@ -9,18 +10,23 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from configargparse import ArgParser
 import pickle
+import pdb
 
-def to_pickle(obj, fn):
-    with open(fn, 'wb') as f:
-        pickle.dump(obj, f)
-def read_pickle(fn):
-    with open(fn, 'rb') as f:
-        return pickle.load(f)
+class LRUpdate(object):
+    def __init__(self, init_lr, step, divide):
+        # From goo.gl/GXQaK6
+        self.init_lr = init_lr
+        self.step = step
+        self.drop = 1. / divide
 
+    def __call__(self, epoch):
+        lr = self.init_lr * np.power(self.drop, np.floor((epoch) / self.step))
+        print(f'Learning rate = {lr}')
+        return lr
 
 def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, batch_size, early_stopping_patience, epochs, exp_id,
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu, iterative,
-         norm_subsample, data_subsample):
+         norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
@@ -32,6 +38,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     ds_valid = ds.sel(time=slice(*valid_years))
     ds_test = ds.sel(time=slice(*test_years))
 
+    # pdb.set_trace()
     dg_train = DataGenerator(
         ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
         data_subsample=data_subsample, norm_subsample=norm_subsample
@@ -48,7 +55,14 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
 
     # Build model
     # TODO: Flexible input shapes and optimizer
-    model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation, dr=dr)
+    if network_type == 'fc':
+        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation, dr=dr)
+    elif network_type == 'fc_no_periodic':
+        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation,
+                          dr=dr, periodic=False)
+    elif network_type =='resnet':
+        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation,
+                          dr=dr, periodic=False)
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
 
@@ -60,8 +74,13 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
                           min_delta=0,
                           patience=early_stopping_patience,
                           verbose=1,
-                          mode='auto'
+                          mode='auto',
+                          # restore_best_weights=restore_best_weights   # Only TF>1.12
                       ))
+    if lr_step is not None:
+        callbacks.append(keras.callbacks.LearningRateScheduler(
+            LRUpdate(lr, lr_step, lr_divide)
+        ))
 
     # Train model
     # TODO: Learning rate schedule
@@ -112,12 +131,16 @@ if __name__ == '__main__':
     p.add_argument('--batch_size', type=int, default=128, help='batch_size')
     p.add_argument('--epochs', type=int, default=100, help='epochs')
     p.add_argument('--early_stopping_patience', type=int, default=None, help='Early stopping patience')
+    p.add_argument('--restore_best_weights', type=bool, default=True, help='ES parameter')
     p.add_argument('--train_years', type=str, nargs='+', default=('1979', '2015'), help='Start/stop years for training')
     p.add_argument('--valid_years', type=str, nargs='+', default=('2016', '2016'), help='Start/stop years for validation')
     p.add_argument('--test_years', type=str, nargs='+', default=('2017', '2018'), help='Start/stop years for testing')
     p.add_argument('--data_subsample', type=int, default=1, help='Subsampling for training data')
     p.add_argument('--norm_subsample', type=int, default=1, help='Subsampling for mean/std')
     p.add_argument('--gpu', type=int, default=0, help='Which GPU')
+    p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
+    p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
+    p.add_argument('--network_type', type=str, default='fc', help='Type')
     args = p.parse_args()
 
     main(
@@ -142,5 +165,9 @@ if __name__ == '__main__':
         gpu=args.gpu,
         iterative=args.iterative,
         data_subsample=args.data_subsample,
-        norm_subsample=args.norm_subsample
+        norm_subsample=args.norm_subsample,
+        lr_step=args.lr_step,
+        lr_divide=args.lr_divide,
+        network_type=args.network_type,
+        restore_best_weights=args.restore_best_weights
     )

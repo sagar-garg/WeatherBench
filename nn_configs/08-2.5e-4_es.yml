@@ -1,4 +1,4 @@
-exp_id: 01.1-default_no_es
+exp_id: 08-2.5e-4_es
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/stephan/data/myWeatherBench/predictions/
@@ -6,6 +6,7 @@ var_dict: {'geopotential': ('z', [500]), 'temperature': ('t', [850])}
 filters: [64, 64, 64, 64, 2]
 kernels: [5, 5, 5, 5, 5]
 lead_time: 72
-lr: 1e-4
+lr: 2.5e-4
+early_stopping_patience: 5
 norm_subsample: 60000
 epochs: 150

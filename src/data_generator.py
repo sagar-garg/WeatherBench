@@ -95,7 +95,7 @@ class DataGenerator(keras.utils.Sequence):
     def on_epoch_end(self):
         'Updates indexes after each epoch'
         self.idxs = np.arange(self.n_samples)
-        if self.shuffle == True:
+        if self.shuffle:
             np.random.shuffle(self.idxs)
 
 
@@ -116,14 +116,12 @@ def create_predictions(model, dg):
     das = []
     for long_var, params in dg.var_dict.items():
         if not long_var == 'constants':
+            # import pdb; pdb.set_trace()
             var, levels = params
             var_names = [var] if levels is None else [f'{var}_{level}' for level in levels]
             var_idxs = [i for i, v in enumerate(preds.level_names) if v in var_names]
             da = preds.isel(level=var_idxs)
-            if levels is not None:
-                da = da.sel(level=levels).drop('level_names')
-            else:
-                da = da.squeeze().drop('level').drop('level_names')
+            da = da.squeeze().drop('level').drop('level_names')
             das.append({var: da})
     return xr.merge(das)
 

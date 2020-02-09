@@ -1,4 +1,4 @@
-exp_id: 01.1-default_no_es
+exp_id: 04-36h_subsample
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/stephan/data/myWeatherBench/predictions/
@@ -7,5 +7,5 @@ filters: [64, 64, 64, 64, 2]
 kernels: [5, 5, 5, 5, 5]
 lead_time: 72
 lr: 1e-4
-norm_subsample: 60000
-epochs: 150
+epochs: 5400
+data_subsample: 36

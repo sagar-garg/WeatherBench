@@ -1,4 +1,4 @@
-exp_id: 01.1-default_no_es
+exp_id: 09-no_periodic
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/stephan/data/myWeatherBench/predictions/
@@ -9,3 +9,5 @@ lead_time: 72
 lr: 1e-4
 norm_subsample: 60000
 epochs: 150
+network_type: fc_no_periodic
+

@@ -32,12 +32,41 @@ class PeriodicConv2D(tf.keras.layers.Conv2D):
         inputs_padded = Lambda(self._pad)(inputs)
         return super().__call__(inputs_padded, *args, **kwargs)
 
-def build_cnn(filters, kernels, input_shape, activation='elu', dr=0):
+class ChannelSlice(tf.keras.layers.Layer):
+
+    def __init__(self, n_out, **kwargs):
+        self.n_out = n_out
+        super().__init__(**kwargs)
+
+    def _slice(self, inputs):
+        # Input: [samples, lat, lon, filters]
+        return inputs[..., :self.n_out]
+
+    def __call__(self, inputs):
+        out = Lambda(self._slice)(inputs)
+        return out
+
+
+def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=True):
     """Fully convolutional network"""
     x = input = Input(shape=input_shape)
     for f, k in zip(filters[:-1], kernels[:-1]):
-        x = PeriodicConv2D(f, k, activation=activation)(x)
+        if periodic: x = PeriodicConv2D(f, k, activation=activation)(x)
+        else: x = Conv2D(f, k, activation=activation, padding='same')(x)
         if dr > 0: x = Dropout(dr)(x)
     output = PeriodicConv2D(filters[-1], kernels[-1])(x)
+    return keras.models.Model(input, output)
+
+
+def build_resnet(filters, kernels, input_shape, activation='elu', dr=0, periodic=True):
+    """Fully convolutional network"""
+    x = input = Input(shape=input_shape)
+    for f, k in zip(filters[:-1], kernels[:-1]):
+        if periodic: x = PeriodicConv2D(f, k, activation=activation)(x)
+        else: x = Conv2D(f, k, activation=activation, padding='same')(x)
+        if dr > 0: x = Dropout(dr)(x)
+    x = PeriodicConv2D(input_shape[2], kernels[-1])(x)
+    x = Add()([input, x])
+    output = ChannelSlice(filters[-1])(x)
     return keras.models.Model(input, output)
 
