@@ -57,16 +57,18 @@ def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=Tr
     output = PeriodicConv2D(filters[-1], kernels[-1])(x)
     return keras.models.Model(input, output)
 
+def resblock(inp, filters, kernel, activation='elu'):
+    x = inp
+    for _ in range(2):
+        x = PeriodicConv2D(filters, kernel, activation=activation)(x)
+    x = Add()([inp, x])
+    return x
 
-def build_resnet(filters, kernels, input_shape, activation='elu', dr=0, periodic=True):
-    """Fully convolutional network"""
+def build_resnet(filters, kernels, input_shape, activation='elu'):
     x = input = Input(shape=input_shape)
+    x = PeriodicConv2D(filters[0], kernels[0], activation=activation)(x)
     for f, k in zip(filters[:-1], kernels[:-1]):
-        if periodic: x = PeriodicConv2D(f, k, activation=activation)(x)
-        else: x = Conv2D(f, k, activation=activation, padding='same')(x)
-        if dr > 0: x = Dropout(dr)(x)
-    x = PeriodicConv2D(input_shape[2], kernels[-1])(x)
-    x = Add()([input, x])
-    output = ChannelSlice(filters[-1])(x)
+        x = resblock(x, f, k, activation)
+    output = PeriodicConv2D(filters[-1], kernels[-1])(x)
     return keras.models.Model(input, output)
 

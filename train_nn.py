@@ -61,8 +61,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
         model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation,
                           dr=dr, periodic=False)
     elif network_type =='resnet':
-        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation,
-                          dr=dr, periodic=False)
+        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation)
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
 

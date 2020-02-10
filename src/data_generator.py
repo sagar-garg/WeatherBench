@@ -112,17 +112,14 @@ def create_predictions(model, dg):
     # Unnormalize
     preds = (preds * dg.std.isel(level=dg.output_idxs).values +
              dg.mean.isel(level=dg.output_idxs).values)
+    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
     das = []
-    for long_var, params in dg.var_dict.items():
-        if not long_var == 'constants':
-            # import pdb; pdb.set_trace()
-            var, levels = params
-            var_names = [var] if levels is None else [f'{var}_{level}' for level in levels]
-            var_idxs = [i for i, v in enumerate(preds.level_names) if v in var_names]
-            da = preds.isel(level=var_idxs)
-            da = da.squeeze().drop('level').drop('level_names')
-            das.append({var: da})
+    for v in unique_vars:
+        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] in v]
+        da = preds.isel(level=idxs).squeeze().drop('level_names')
+        if not 'level' in da.dims: da = da.drop('level')
+        das.append({v: da})
     return xr.merge(das)
 
 # TODO: Outdated
