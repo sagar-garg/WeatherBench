@@ -26,42 +26,49 @@ class LRUpdate(object):
 
 def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, batch_size, early_stopping_patience, epochs, exp_id,
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu, iterative,
-         norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights):
+         norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
+         negative_slope, bn_position, nt_in, dt_in, use_bias, l2):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
 
     # Open dataset and create data generators
-    ds = xr.merge([xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords') for var in var_dict.keys()])
+    ds = xr.merge(
+        [xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords')
+         for var in var_dict.keys()],
+        fill_value=0
+    )
 
     ds_train = ds.sel(time=slice(*train_years))
     ds_valid = ds.sel(time=slice(*valid_years))
     ds_test = ds.sel(time=slice(*test_years))
 
-    # pdb.set_trace()
     dg_train = DataGenerator(
         ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
-        data_subsample=data_subsample, norm_subsample=norm_subsample
+        data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in
     )
     dg_valid = DataGenerator(
         ds_valid, var_dict, lead_time, batch_size=batch_size, mean=dg_train.mean, std=dg_train.std,
-        shuffle=False, output_vars=output_vars
+        shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
     )
     dg_test =  DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size, mean=dg_train.mean, std=dg_train.std,
-        shuffle=False, output_vars=output_vars
+        shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
     )
     print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
 
     # Build model
     # TODO: Flexible input shapes and optimizer
     if network_type == 'fc':
-        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation, dr=dr)
+        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in),
+                          activation=activation, dr=dr, l2=l2)
     elif network_type == 'fc_no_periodic':
-        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation,
-                          dr=dr, periodic=False)
+        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in), activation=activation,
+                          dr=dr, periodic=False, l2=l2)
     elif network_type =='resnet':
-        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)), activation=activation)
+        assert activation == 'relu', 'Resnet only with ReLU'
+        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in),
+                             negative_slope=negative_slope, bn_position=bn_position, use_bias=use_bias, l2=l2)
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
 
@@ -102,11 +109,11 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     z500_valid = load_test_data(f'{datadir}geopotential_500', 'z')
     t850_valid = load_test_data(f'{datadir}temperature_850', 't')
     try:
-        print(compute_weighted_rmse(preds.z.sel(level=500), z500_valid).load())
+        print(compute_weighted_rmse(preds.z, z500_valid).load())
     except:
         print('Z500 not found in predictions.')
     try:
-        print(compute_weighted_rmse(preds.t.sel(level=850), t850_valid).load())
+        print(compute_weighted_rmse(preds.t, t850_valid).load())
     except:
         print('T850 not found in predictions.')
 
@@ -140,6 +147,12 @@ if __name__ == '__main__':
     p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
     p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
     p.add_argument('--network_type', type=str, default='fc', help='Type')
+    p.add_argument('--negative_slope', type=float, default=0, help='Slope for Resnet ReLU')
+    p.add_argument('--bn_position', type=str, default=None, help='pre, mid or post')
+    p.add_argument('--nt_in', type=int, default=1, help='Number of input time steps')
+    p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
+    p.add_argument('--use_bias', type=bool, default=True, help='Use bias in resnet convs')
+    p.add_argument('--l2', type=float, default=0, help='Weight decay')
     args = p.parse_args()
 
     main(
@@ -168,5 +181,11 @@ if __name__ == '__main__':
         lr_step=args.lr_step,
         lr_divide=args.lr_divide,
         network_type=args.network_type,
-        restore_best_weights=args.restore_best_weights
+        restore_best_weights=args.restore_best_weights,
+        negative_slope=args.negative_slope,
+        bn_position=args.bn_position,
+        nt_in=args.nt_in,
+        dt_in=args.dt_in,
+        use_bias=args.use_bias,
+        l2=args.l2
     )

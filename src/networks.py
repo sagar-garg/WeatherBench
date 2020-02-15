@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.layers import *
+from tensorflow.keras import regularizers
 
 def limit_mem():
     config = tf.ConfigProto()
@@ -47,28 +48,33 @@ class ChannelSlice(tf.keras.layers.Layer):
         return out
 
 
-def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=True):
+def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=True, l2=0):
     """Fully convolutional network"""
     x = input = Input(shape=input_shape)
     for f, k in zip(filters[:-1], kernels[:-1]):
-        if periodic: x = PeriodicConv2D(f, k, activation=activation)(x)
-        else: x = Conv2D(f, k, activation=activation, padding='same')(x)
+        if periodic: x = PeriodicConv2D(f, k, activation=activation, kernel_regularizer=regularizers.l2(l2))(x)
+        else: x = Conv2D(f, k, activation=activation, padding='same', kernel_regularizer=regularizers.l2(l2))(x)
         if dr > 0: x = Dropout(dr)(x)
-    output = PeriodicConv2D(filters[-1], kernels[-1])(x)
+    output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
     return keras.models.Model(input, output)
 
-def resblock(inp, filters, kernel, activation='elu'):
+def resblock(inp, filters, kernel, negative_slope=0, bn_position=None, use_bias=True, res=True, n_conv=2, l2=0):
     x = inp
-    for _ in range(2):
-        x = PeriodicConv2D(filters, kernel, activation=activation)(x)
-    x = Add()([inp, x])
+    for _ in range(n_conv):
+        if bn_position == 'pre': x = BatchNormalization()(x)
+        x = PeriodicConv2D(filters, kernel, use_bias=use_bias, kernel_regularizer=regularizers.l2(l2))(x)
+        if bn_position == 'mid': x = BatchNormalization()(x)
+        x = ReLU(negative_slope=negative_slope)(x)
+        if bn_position == 'post': x = BatchNormalization()(x)
+    if res: x = Add()([inp, x])
     return x
 
-def build_resnet(filters, kernels, input_shape, activation='elu'):
+def build_resnet(filters, kernels, input_shape, negative_slope=0, bn_position=None, use_bias=True, l2=0):
     x = input = Input(shape=input_shape)
-    x = PeriodicConv2D(filters[0], kernels[0], activation=activation)(x)
-    for f, k in zip(filters[:-1], kernels[:-1]):
-        x = resblock(x, f, k, activation)
-    output = PeriodicConv2D(filters[-1], kernels[-1])(x)
+    x = PeriodicConv2D(filters[0], kernels[0], use_bias=use_bias, kernel_regularizer=regularizers.l2(l2))(x)
+    x = ReLU(negative_slope=negative_slope)(x)
+    for f, k in zip(filters[1:-1], kernels[1:-1]):
+        x = resblock(x, f, k, negative_slope, bn_position, use_bias, l2=l2)
+    output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
     return keras.models.Model(input, output)
 

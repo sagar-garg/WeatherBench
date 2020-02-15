@@ -3,10 +3,12 @@ import numpy as np
 import xarray as xr
 import tensorflow.keras as keras
 import datetime
+import pdb
 
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
-                 mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1):
+                 mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
+                 nt_in=1, dt_in=1):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -26,6 +28,8 @@ class DataGenerator(keras.utils.Sequence):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.lead_time = lead_time
+        self.nt_in = nt_in
+        self.dt_in = dt_in
 
         data = []
         level_names = []
@@ -89,12 +93,16 @@ class DataGenerator(keras.utils.Sequence):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
         X = self.data.isel(time=idxs).values
+        if self.nt_in > 1:
+            X = np.concatenate([
+                self.data.isel(time=idxs-nt_in*self.dt_in).values for nt_in in range(self.nt_in-1, 0, -1)
+            ] + [X], axis=-1)
         y = self.data.isel(time=idxs + self.nt, level=self.output_idxs).values
         return X, y
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
-        self.idxs = np.arange(self.n_samples)
+        self.idxs = np.arange(self.n_samples - (self.nt_in * self.dt_in) + 1)
         if self.shuffle:
             np.random.shuffle(self.idxs)
 
