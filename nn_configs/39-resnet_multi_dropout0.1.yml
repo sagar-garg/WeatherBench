@@ -1,4 +1,4 @@
-exp_id: 31-resnet_multi
+exp_id: 39p-resnet_multi_dropout0.1
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/stephan/data/myWeatherBench/predictions/
@@ -16,3 +16,4 @@ network_type: resnet
 activation: relu
 bn_position: post
 batch_size: 64
+dropout: 0.1

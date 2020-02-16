@@ -30,6 +30,7 @@ class DataGenerator(keras.utils.Sequence):
         self.lead_time = lead_time
         self.nt_in = nt_in
         self.dt_in = dt_in
+        self.nt_offset = (nt_in * dt_in) - 1
 
         data = []
         level_names = []
@@ -75,8 +76,8 @@ class DataGenerator(keras.utils.Sequence):
         self.data = (self.data - self.mean) / self.std
 
         self.n_samples = self.data.isel(time=slice(0, -self.nt)).shape[0]
-        self.init_time = self.data.isel(time=slice(0, -self.nt)).time
-        self.valid_time = self.data.isel(time=slice(self.nt, None)).time
+        self.init_time = self.data.isel(time=slice(self.nt_offset, -self.nt)).time
+        self.valid_time = self.data.isel(time=slice(self.nt+self.nt_offset, None)).time
 
         self.on_epoch_end()
 
@@ -87,7 +88,7 @@ class DataGenerator(keras.utils.Sequence):
 
     def __len__(self):
         'Denotes the number of batches per epoch'
-        return int(np.ceil(self.n_samples / self.batch_size))
+        return int(np.ceil(len(self.idxs) / self.batch_size))
 
     def __getitem__(self, i):
         'Generate one batch of data'
@@ -102,7 +103,7 @@ class DataGenerator(keras.utils.Sequence):
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
-        self.idxs = np.arange(self.n_samples - (self.nt_in * self.dt_in) + 1)
+        self.idxs = np.arange(self.nt_offset, self.n_samples)
         if self.shuffle:
             np.random.shuffle(self.idxs)
 

@@ -1,4 +1,4 @@
-exp_id: 31-resnet_multi
+exp_id: 37-resnet_multi_new
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/stephan/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/stephan/data/myWeatherBench/predictions/

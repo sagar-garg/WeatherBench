@@ -27,7 +27,7 @@ class LRUpdate(object):
 def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, batch_size, early_stopping_patience, epochs, exp_id,
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu, iterative,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
-         negative_slope, bn_position, nt_in, dt_in, use_bias, l2):
+         bn_position, nt_in, dt_in, use_bias, l2, skip, dropout):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
@@ -68,7 +68,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     elif network_type =='resnet':
         assert activation == 'relu', 'Resnet only with ReLU'
         model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in),
-                             negative_slope=negative_slope, bn_position=bn_position, use_bias=use_bias, l2=l2)
+                             bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip, dropout=dropout)
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
 
@@ -147,12 +147,14 @@ if __name__ == '__main__':
     p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
     p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
     p.add_argument('--network_type', type=str, default='fc', help='Type')
-    p.add_argument('--negative_slope', type=float, default=0, help='Slope for Resnet ReLU')
+    # p.add_argument('--negative_slope', type=float, default=0, help='Slope for Resnet ReLU')
     p.add_argument('--bn_position', type=str, default=None, help='pre, mid or post')
     p.add_argument('--nt_in', type=int, default=1, help='Number of input time steps')
     p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
     p.add_argument('--use_bias', type=bool, default=True, help='Use bias in resnet convs')
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
+    p.add_argument('--dropout', type=float, default=0, help='Dropout')
+    p.add_argument('--skip', type=bool, default=True, help='Add skip convs in resnet builder')
     args = p.parse_args()
 
     main(
@@ -182,10 +184,12 @@ if __name__ == '__main__':
         lr_divide=args.lr_divide,
         network_type=args.network_type,
         restore_best_weights=args.restore_best_weights,
-        negative_slope=args.negative_slope,
+        # negative_slope=args.negative_slope,
         bn_position=args.bn_position,
         nt_in=args.nt_in,
         dt_in=args.dt_in,
         use_bias=args.use_bias,
-        l2=args.l2
+        l2=args.l2,
+        skip=args.skip,
+        dropout=args.dropout
     )

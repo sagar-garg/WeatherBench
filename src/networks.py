@@ -58,23 +58,38 @@ def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=Tr
     output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
     return keras.models.Model(input, output)
 
-def resblock(inp, filters, kernel, negative_slope=0, bn_position=None, use_bias=True, res=True, n_conv=2, l2=0):
-    x = inp
-    for _ in range(n_conv):
-        if bn_position == 'pre': x = BatchNormalization()(x)
-        x = PeriodicConv2D(filters, kernel, use_bias=use_bias, kernel_regularizer=regularizers.l2(l2))(x)
-        if bn_position == 'mid': x = BatchNormalization()(x)
-        x = ReLU(negative_slope=negative_slope)(x)
-        if bn_position == 'post': x = BatchNormalization()(x)
-    if res: x = Add()([inp, x])
+def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
+              use_bias=True, dropout=0):
+    x = inputs
+    if bn_position == 'pre': x = BatchNormalization()(x)
+    x = PeriodicConv2D(filters, kernel)(x)
+    if bn_position == 'mid': x = BatchNormalization()(x)
+    x = ReLU()(x)
+    if bn_position == 'post': x = BatchNormalization()(x)
+    if dropout > 0: x = Dropout(dropout)(x)
     return x
 
-def build_resnet(filters, kernels, input_shape, negative_slope=0, bn_position=None, use_bias=True, l2=0):
+
+def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
+                 skip=True, dropout=0):
     x = input = Input(shape=input_shape)
-    x = PeriodicConv2D(filters[0], kernels[0], use_bias=use_bias, kernel_regularizer=regularizers.l2(l2))(x)
-    x = ReLU(negative_slope=negative_slope)(x)
+    # First conv block to get up to shape
+    x = convblock(
+        x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
+        dropout=dropout
+    )
+
+    # Resblocks
     for f, k in zip(filters[1:-1], kernels[1:-1]):
-        x = resblock(x, f, k, negative_slope, bn_position, use_bias, l2=l2)
+        y = x
+        for _ in range(2):
+            x = convblock(
+                x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                dropout=dropout
+            )
+        if skip: x = Add()([y, x])
+
+    # Final convolution
     output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
     return keras.models.Model(input, output)
 
