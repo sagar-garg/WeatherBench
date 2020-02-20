@@ -24,8 +24,8 @@ class LRUpdate(object):
         print(f'Learning rate = {lr}')
         return lr
 
-def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, batch_size, early_stopping_patience, epochs, exp_id,
-         model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu, iterative,
+def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early_stopping_patience, epochs, exp_id,
+         model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
@@ -36,7 +36,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     ds = xr.merge(
         [xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords')
          for var in var_dict.keys()],
-        fill_value=0
+        fill_value=0   # For the 'tisr' NaNs
     )
 
     ds_train = ds.sel(time=slice(*train_years))
@@ -58,19 +58,18 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
 
     # Build model
-    # TODO: Flexible input shapes and optimizer
-    if network_type == 'fc':
-        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in),
-                          activation=activation, dr=dr, l2=l2)
-    elif network_type == 'fc_no_periodic':
-        model = build_cnn(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in), activation=activation,
-                          dr=dr, periodic=False, l2=l2)
-    elif network_type =='resnet':
-        assert activation == 'relu', 'Resnet only with ReLU'
-        model = build_resnet(filters, kernels, input_shape=(32, 64, len(dg_train.data.level)*nt_in),
-                             bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip, dropout=dropout)
+    if network_type == 'resnet':
+        model = build_resnet(
+            filters, kernels, input_shape=(32, 64, len(dg_train.data.level) * nt_in),
+            bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
+            dropout=dropout
+        )
+    elif network_type == 'unet':
+        pass
+
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
+
 
     # Learning rate settings
     callbacks = []
@@ -81,7 +80,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
                           patience=early_stopping_patience,
                           verbose=1,
                           mode='auto',
-                          # restore_best_weights=restore_best_weights   # Only TF>1.12
+                          restore_best_weights=restore_best_weights
                       ))
     if lr_step is not None:
         callbacks.append(keras.callbacks.LearningRateScheduler(
@@ -93,8 +92,10 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, activation, dr, b
     history = model.fit_generator(dg_train, epochs=epochs, validation_data=dg_valid,
                       callbacks=callbacks
                       )
-    print(f'Saving model weights: {model_save_dir}/{exp_id}.h5')
-    model.save_weights(f'{model_save_dir}/{exp_id}.h5')
+    print(f'Saving model: {model_save_dir}/{exp_id}.h5')
+    model.save(f'{model_save_dir}/{exp_id}.h5')
+    print(f'Saving model weights: {model_save_dir}/{exp_id}_weights.h5')
+    model.save_weights(f'{model_save_dir}/{exp_id}_weights.h5')
     print(f'Saving training_history: {model_save_dir}/{exp_id}_history.pkl')
     to_pickle(history.history, f'{model_save_dir}/{exp_id}_history.pkl')
 
@@ -129,25 +130,23 @@ if __name__ == '__main__':
     p.add_argument('--filters', type=int, nargs='+', required=True, help='Filters for each layer')
     p.add_argument('--kernels', type=int, nargs='+', required=True, help='Kernel size for each layer')
     p.add_argument('--lead_time', type=int, required=True, help='Forecast lead time')
-    p.add_argument('--iterative', type=bool, default=False, help='Is iterative forecast')
-    p.add_argument('--iterative_max_lead_time', type=int, default=5*24, help='Max lead time for iterative forecasts')
+    # p.add_argument('--iterative', type=bool, default=False, help='Is iterative forecast')
+    # p.add_argument('--iterative_max_lead_time', type=int, default=5*24, help='Max lead time for iterative forecasts')
     p.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
-    p.add_argument('--activation', type=str, default='elu', help='Activation function')
-    p.add_argument('--dr', type=float, default=0, help='Dropout rate')
-    p.add_argument('--batch_size', type=int, default=128, help='batch_size')
-    p.add_argument('--epochs', type=int, default=100, help='epochs')
+    # p.add_argument('--activation', type=str, default='relu', help='Activation function')
+    p.add_argument('--batch_size', type=int, default=64, help='batch_size')
+    p.add_argument('--epochs', type=int, default=1000, help='epochs')
     p.add_argument('--early_stopping_patience', type=int, default=None, help='Early stopping patience')
     p.add_argument('--restore_best_weights', type=bool, default=True, help='ES parameter')
+    p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
+    p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
     p.add_argument('--train_years', type=str, nargs='+', default=('1979', '2015'), help='Start/stop years for training')
     p.add_argument('--valid_years', type=str, nargs='+', default=('2016', '2016'), help='Start/stop years for validation')
     p.add_argument('--test_years', type=str, nargs='+', default=('2017', '2018'), help='Start/stop years for testing')
     p.add_argument('--data_subsample', type=int, default=1, help='Subsampling for training data')
     p.add_argument('--norm_subsample', type=int, default=1, help='Subsampling for mean/std')
     p.add_argument('--gpu', type=int, default=0, help='Which GPU')
-    p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
-    p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
-    p.add_argument('--network_type', type=str, default='fc', help='Type')
-    # p.add_argument('--negative_slope', type=float, default=0, help='Slope for Resnet ReLU')
+    p.add_argument('--network_type', type=str, default='resnet', help='Type')
     p.add_argument('--bn_position', type=str, default=None, help='pre, mid or post')
     p.add_argument('--nt_in', type=int, default=1, help='Number of input time steps')
     p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
@@ -164,8 +163,7 @@ if __name__ == '__main__':
         filters=args.filters,
         kernels=args.kernels,
         lr=args.lr,
-        activation=args.activation,
-        dr=args.dr,
+        # activation=args.activation,
         batch_size=args.batch_size,
         epochs=args.epochs,
         early_stopping_patience=args.early_stopping_patience,
@@ -177,14 +175,13 @@ if __name__ == '__main__':
         test_years=args.test_years,
         lead_time=args.lead_time,
         gpu=args.gpu,
-        iterative=args.iterative,
+        # iterative=args.iterative,
         data_subsample=args.data_subsample,
         norm_subsample=args.norm_subsample,
         lr_step=args.lr_step,
         lr_divide=args.lr_divide,
         network_type=args.network_type,
         restore_best_weights=args.restore_best_weights,
-        # negative_slope=args.negative_slope,
         bn_position=args.bn_position,
         nt_in=args.nt_in,
         dt_in=args.dt_in,

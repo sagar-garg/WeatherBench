@@ -99,7 +99,7 @@ class DataGenerator(keras.utils.Sequence):
                 self.data.isel(time=idxs-nt_in*self.dt_in).values for nt_in in range(self.nt_in-1, 0, -1)
             ] + [X], axis=-1)
         y = self.data.isel(time=idxs + self.nt, level=self.output_idxs).values
-        return X, y
+        return X.astype('float32'), y.astype('float32')
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'

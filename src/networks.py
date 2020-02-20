@@ -4,34 +4,55 @@ from tensorflow.keras.layers import *
 from tensorflow.keras import regularizers
 
 def limit_mem():
-    config = tf.ConfigProto()
+    config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = True
-    tf.Session(config=config)
+    tf.compat.v1.InteractiveSession(config=config)
 
 
-class PeriodicConv2D(tf.keras.layers.Conv2D):
-    """Convolution with periodic padding in second spatial dimension (lon)"""
+class PeriodicPadding2D(tf.keras.layers.Layer):
+    def __init__(self, pad_width, **kwargs):
+        super().__init__(**kwargs)
+        self.pad_width = pad_width
 
-    def __init__(self, filters, kernel_size, **kwargs):
-        assert type(kernel_size) is int, 'Periodic convolutions only works for square kernels.'
-        self.pad_width = (kernel_size - 1) // 2
-        super().__init__(filters, kernel_size, **kwargs)
-        assert self.padding == 'valid', 'Periodic convolution only works for valid padding.'
-        assert sum(self.strides) == 2, 'Periodic padding only works for stride (1, 1)'
-
-    def _pad(self, inputs):
-        # Input: [samples, lat, lon, filters]
-        # Periodic padding in lon direction
+    def call(self, inputs, **kwargs):
         inputs_padded = tf.concat(
             [inputs[:, :, -self.pad_width:, :], inputs, inputs[:, :, :self.pad_width, :]], axis=2)
         # Zero padding in the lat direction
         inputs_padded = tf.pad(inputs_padded, [[0, 0], [self.pad_width, self.pad_width], [0, 0], [0, 0]])
         return inputs_padded
 
-    def __call__(self, inputs, *args, **kwargs):
-        # Unfortunate workaround necessary for TF < 1.13
-        inputs_padded = Lambda(self._pad)(inputs)
-        return super().__call__(inputs_padded, *args, **kwargs)
+    def get_config(self):
+        config = super().get_config()
+        config.update({'pad_width': self.pad_width})
+        return config
+
+
+class PeriodicConv2D(tf.keras.layers.Layer):
+    def __init__(self, filters,
+                 kernel_size,
+                 conv_kwargs={},
+                 **kwargs, ):
+        super().__init__(**kwargs)
+        self.filters = filters
+        self.kernel_size = kernel_size
+        self.conv_kwargs = conv_kwargs
+        if type(kernel_size) is not int:
+            assert kernel_size[0] == kernel_size[1], 'PeriodicConv2D only works for square kernels'
+            kernel_size = kernel_size[0]
+        pad_width = (kernel_size - 1) // 2
+        self.padding = PeriodicPadding2D(pad_width)
+        self.conv = Conv2D(
+            filters, kernel_size, padding='valid', **conv_kwargs
+        )
+
+    def call(self, inputs):
+        return self.conv(self.padding(inputs))
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'filters': self.filters, 'kernel_size': self.kernel_size, 'conv_kwargs': self.conv_kwargs})
+        return config
+
 
 class ChannelSlice(tf.keras.layers.Layer):
 
@@ -48,21 +69,16 @@ class ChannelSlice(tf.keras.layers.Layer):
         return out
 
 
-def build_cnn(filters, kernels, input_shape, activation='elu', dr=0, periodic=True, l2=0):
-    """Fully convolutional network"""
-    x = input = Input(shape=input_shape)
-    for f, k in zip(filters[:-1], kernels[:-1]):
-        if periodic: x = PeriodicConv2D(f, k, activation=activation, kernel_regularizer=regularizers.l2(l2))(x)
-        else: x = Conv2D(f, k, activation=activation, padding='same', kernel_regularizer=regularizers.l2(l2))(x)
-        if dr > 0: x = Dropout(dr)(x)
-    output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
-    return keras.models.Model(input, output)
-
 def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
               use_bias=True, dropout=0):
     x = inputs
     if bn_position == 'pre': x = BatchNormalization()(x)
-    x = PeriodicConv2D(filters, kernel)(x)
+    x = PeriodicConv2D(
+        filters, kernel, conv_kwargs={
+            'kernel_regularizer': regularizers.l2(l2),
+            'use_bias': use_bias
+        }
+    )(x)
     if bn_position == 'mid': x = BatchNormalization()(x)
     x = ReLU()(x)
     if bn_position == 'post': x = BatchNormalization()(x)
@@ -73,6 +89,7 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
                  skip=True, dropout=0):
     x = input = Input(shape=input_shape)
+
     # First conv block to get up to shape
     x = convblock(
         x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
@@ -90,6 +107,7 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
         if skip: x = Add()([y, x])
 
     # Final convolution
-    output = PeriodicConv2D(filters[-1], kernels[-1], kernel_regularizer=regularizers.l2(l2))(x)
+    output = PeriodicConv2D(
+        filters[-1], kernels[-1], conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
     return keras.models.Model(input, output)
 
