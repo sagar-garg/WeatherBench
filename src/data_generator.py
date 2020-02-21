@@ -111,7 +111,7 @@ class DataGenerator(keras.utils.Sequence):
 def create_predictions(model, dg):
     """Create non-iterative predictions"""
     preds = xr.DataArray(
-        model.predict_generator(dg),
+        model.predict(dg),
         dims=['time', 'lat', 'lon', 'level'],
         coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
                 'level': dg.data.isel(level=dg.output_idxs).level,

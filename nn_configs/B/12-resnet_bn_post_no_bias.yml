@@ -1,4 +1,4 @@
-exp_id: 01-resnet_baseline
+exp_id: 12-resnet_bn_post_no_bias
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -12,3 +12,5 @@ early_stopping_patience: 10
 reduce_lr_patience: 5
 data_subsample: 2
 norm_subsample: 30000
+bn_position: post
+use_bias: False

@@ -27,7 +27,8 @@ class LRUpdate(object):
 def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early_stopping_patience, epochs, exp_id,
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
-         bn_position, nt_in, dt_in, use_bias, l2, skip, dropout):
+         bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
+         reduce_lr_patience, reduce_lr_factor):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
@@ -75,13 +76,17 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
     callbacks = []
     if early_stopping_patience is not None:
         callbacks.append(tf.keras.callbacks.EarlyStopping(
-                          monitor='val_loss',
-                          min_delta=0,
-                          patience=early_stopping_patience,
-                          verbose=1,
-                          mode='auto',
-                          restore_best_weights=restore_best_weights
+          patience=early_stopping_patience,
+          verbose=1,
+          mode='auto',
+          restore_best_weights=restore_best_weights
                       ))
+    if reduce_lr_patience is not None:
+        callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(
+            patience=reduce_lr_patience,
+            factor=reduce_lr_factor,
+            verbose=1
+        ))
     if lr_step is not None:
         callbacks.append(keras.callbacks.LearningRateScheduler(
             LRUpdate(lr, lr_step, lr_divide)
@@ -89,7 +94,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
 
     # Train model
     # TODO: Learning rate schedule
-    history = model.fit_generator(dg_train, epochs=epochs, validation_data=dg_valid,
+    history = model.fit(dg_train, epochs=epochs, validation_data=dg_valid,
                       callbacks=callbacks
                       )
     print(f'Saving model: {model_save_dir}/{exp_id}.h5')
@@ -138,6 +143,8 @@ if __name__ == '__main__':
     p.add_argument('--epochs', type=int, default=1000, help='epochs')
     p.add_argument('--early_stopping_patience', type=int, default=None, help='Early stopping patience')
     p.add_argument('--restore_best_weights', type=bool, default=True, help='ES parameter')
+    p.add_argument('--reduce_lr_patience', type=int, default=None, help='Reduce LR patience')
+    p.add_argument('--reduce_lr_factor', type=float, default=0.2, help='Reduce LR factor')
     p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
     p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
     p.add_argument('--train_years', type=str, nargs='+', default=('1979', '2015'), help='Start/stop years for training')
@@ -188,5 +195,7 @@ if __name__ == '__main__':
         use_bias=args.use_bias,
         l2=args.l2,
         skip=args.skip,
-        dropout=args.dropout
+        dropout=args.dropout,
+        reduce_lr_patience=args.reduce_lr_patience,
+        reduce_lr_factor=args.reduce_lr_factor
     )

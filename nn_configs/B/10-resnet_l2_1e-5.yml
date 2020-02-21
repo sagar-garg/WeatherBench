@@ -1,4 +1,4 @@
-exp_id: 01-resnet_baseline
+exp_id: 10-resnet_l2_1e-5
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -12,3 +12,4 @@ early_stopping_patience: 10
 reduce_lr_patience: 5
 data_subsample: 2
 norm_subsample: 30000
+l2: 1e-5
