@@ -30,7 +30,7 @@ class DataGenerator(keras.utils.Sequence):
         self.lead_time = lead_time
         self.nt_in = nt_in
         self.dt_in = dt_in
-        self.nt_offset = (nt_in * dt_in) - 1
+        self.nt_offset = (nt_in - 1) * dt_in
 
         data = []
         level_names = []
@@ -96,7 +96,8 @@ class DataGenerator(keras.utils.Sequence):
         X = self.data.isel(time=idxs).values
         if self.nt_in > 1:
             X = np.concatenate([
-                self.data.isel(time=idxs-nt_in*self.dt_in).values for nt_in in range(self.nt_in-1, 0, -1)
+                self.data.isel(time=idxs-nt_in*self.dt_in).values
+                                   for nt_in in range(self.nt_in-1, 0, -1)
             ] + [X], axis=-1)
         y = self.data.isel(time=idxs + self.nt, level=self.output_idxs).values
         return X.astype('float32'), y.astype('float32')

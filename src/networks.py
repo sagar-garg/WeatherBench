@@ -15,6 +15,8 @@ class PeriodicPadding2D(tf.keras.layers.Layer):
         self.pad_width = pad_width
 
     def call(self, inputs, **kwargs):
+        if self.pad_width == 0:
+            return inputs
         inputs_padded = tf.concat(
             [inputs[:, :, -self.pad_width:, :], inputs, inputs[:, :, :self.pad_width, :]], axis=2)
         # Zero padding in the lat direction
@@ -70,7 +72,7 @@ class ChannelSlice(tf.keras.layers.Layer):
 
 
 def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
-              use_bias=True, dropout=0):
+              use_bias=True, dropout=0, activation='relu'):
     x = inputs
     if bn_position == 'pre': x = BatchNormalization()(x)
     x = PeriodicConv2D(
@@ -80,9 +82,20 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
         }
     )(x)
     if bn_position == 'mid': x = BatchNormalization()(x)
-    x = ReLU()(x)
+    x = Activation(activation)(x)
     if bn_position == 'post': x = BatchNormalization()(x)
     if dropout > 0: x = Dropout(dropout)(x)
+    return x
+
+def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
+             dropout=0, skip=True):
+    x = inputs
+    for _ in range(2):
+        x = convblock(
+            x, filters, kernel, bn_position=bn_position, l2=l2, use_bias=use_bias,
+            dropout=dropout
+        )
+    if skip: x = Add()([inputs, x])
     return x
 
 
@@ -98,16 +111,59 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
 
     # Resblocks
     for f, k in zip(filters[1:-1], kernels[1:-1]):
-        y = x
-        for _ in range(2):
-            x = convblock(
-                x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
-                dropout=dropout
-            )
-        if skip: x = Add()([y, x])
+        resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                dropout=dropout, skip=skip)
 
     # Final convolution
     output = PeriodicConv2D(
         filters[-1], kernels[-1], conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
     return keras.models.Model(input, output)
+
+
+def build_unet(input_shape, n_layers, filters_start, channels_out, kernel=3, u_skip=True,
+               res_skip=True, l2=0, bn_position=None, dropout=0):
+    "https://github.com/Nishanksingla/UNet-with-ResBlock/blob/master/resnet34_unet_model.py"
+    x = input = Input(shape=input_shape)
+    filters = filters_start
+
+    # Down
+    down_layers = []
+    for i in range(n_layers):
+        # Resblock
+        x_res = PeriodicConv2D(
+            filters, 1, conv_kwargs={
+                'use_bias': False, 'kernel_regularizer': regularizers.l2(l2)})(x)
+        x = convblock(x, filters, kernel, bn_position=bn_position, l2=l2, dropout=dropout)
+        x = convblock(x, filters, kernel, bn_position=bn_position, l2=l2, activation='linear',
+                      dropout=dropout)
+        if res_skip: x = Add()([x, x_res])
+        x = ReLU()(x)
+        if not i == n_layers - 1:
+            down_layers.append(x)
+            # Downsampling
+            x = MaxPooling2D()(x)
+            filters *= 2
+
+    # Up
+    for dl in reversed(down_layers):
+        filters //= 2
+        # Upsample
+        x = UpSampling2D()(x)
+        x = PeriodicConv2D(filters, 3, conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
+        x = ReLU()(x)
+
+        # Concatenate
+        if u_skip:
+            x = Concatenate()([x, dl])
+
+        # Resblock
+        x_res = PeriodicConv2D(filters, 1, conv_kwargs={'use_bias': False})(x)
+        x = convblock(x, filters, kernel, bn_position=bn_position, l2=l2, dropout=dropout)
+        x = convblock(x, filters, kernel, bn_position=bn_position, l2=l2, activation='linear',
+                      dropout=dropout)
+        if res_skip: x = Add()([x, x_res])
+        x = ReLU()(x)
+
+    x = PeriodicConv2D(channels_out, 1, conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
+    return keras.models.Model(input, x)
 

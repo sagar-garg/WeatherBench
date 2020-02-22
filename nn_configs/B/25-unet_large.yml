@@ -1,0 +1,15 @@
+exp_id: 25-unet_large
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [200, 500, 850]), 'temperature': ('t', [200, 500, 850]), 'u_component_of_wind': ('u', [200, 500, 850]), 'v_component_of_wind': ('v', [200, 500, 850]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+network_type: unet
+filters: [64, 2]
+unet_layers: 6
+lead_time: 72
+lr: 0.5e-4
+early_stopping_patience: 10
+reduce_lr_patience: 5
+data_subsample: 2
+norm_subsample: 30000

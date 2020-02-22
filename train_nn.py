@@ -28,7 +28,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
-         reduce_lr_patience, reduce_lr_factor):
+         reduce_lr_patience, reduce_lr_factor, unet_layers, u_skip):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
@@ -66,7 +66,11 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
             dropout=dropout
         )
     elif network_type == 'unet':
-        pass
+        model =build_unet(
+            input_shape=(32, 64, len(dg_train.data.level) * nt_in), n_layers=unet_layers,
+            filters_start=filters[0], channels_out=filters[1], u_skip=u_skip, res_skip=skip,
+            l2=l2, bn_position=bn_position, dropout=dropout
+        )
 
     model.compile(keras.optimizers.Adam(lr), 'mse')
     print(model.summary())
@@ -133,7 +137,7 @@ if __name__ == '__main__':
     p.add_argument('--var_dict', required=True, help='Variables: as an ugly dictionary...')
     p.add_argument('--output_vars', nargs='+', help='Output variables. Format {var}_{level}', default=None)
     p.add_argument('--filters', type=int, nargs='+', required=True, help='Filters for each layer')
-    p.add_argument('--kernels', type=int, nargs='+', required=True, help='Kernel size for each layer')
+    p.add_argument('--kernels', type=int, nargs='+', default=None, help='Kernel size for each layer')
     p.add_argument('--lead_time', type=int, required=True, help='Forecast lead time')
     # p.add_argument('--iterative', type=bool, default=False, help='Is iterative forecast')
     # p.add_argument('--iterative_max_lead_time', type=int, default=5*24, help='Max lead time for iterative forecasts')
@@ -161,6 +165,8 @@ if __name__ == '__main__':
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
     p.add_argument('--dropout', type=float, default=0, help='Dropout')
     p.add_argument('--skip', type=bool, default=True, help='Add skip convs in resnet builder')
+    p.add_argument('--u_skip', type=bool, default=True, help='Add skip convs in unet')
+    p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
     args = p.parse_args()
 
     main(
@@ -197,5 +203,7 @@ if __name__ == '__main__':
         skip=args.skip,
         dropout=args.dropout,
         reduce_lr_patience=args.reduce_lr_patience,
-        reduce_lr_factor=args.reduce_lr_factor
+        reduce_lr_factor=args.reduce_lr_factor,
+        u_skip=args.u_skip,
+        unet_layers=args.unet_layers
     )
