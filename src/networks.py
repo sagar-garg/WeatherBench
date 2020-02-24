@@ -111,7 +111,7 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
 
     # Resblocks
     for f, k in zip(filters[1:-1], kernels[1:-1]):
-        resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+        x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
                 dropout=dropout, skip=skip)
 
     # Final convolution

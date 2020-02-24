@@ -60,13 +60,14 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
 
     # Build model
     if network_type == 'resnet':
+        print(filters, kernels)
         model = build_resnet(
             filters, kernels, input_shape=(32, 64, len(dg_train.data.level) * nt_in),
             bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
             dropout=dropout
         )
     elif network_type == 'unet':
-        model =build_unet(
+        model = build_unet(
             input_shape=(32, 64, len(dg_train.data.level) * nt_in), n_layers=unet_layers,
             filters_start=filters[0], channels_out=filters[1], u_skip=u_skip, res_skip=skip,
             l2=l2, bn_position=bn_position, dropout=dropout
