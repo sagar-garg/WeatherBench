@@ -2,6 +2,7 @@ from src.score import *
 from src.data_generator import *
 from src.networks import *
 from src.utils import *
+from src.regrid import regrid
 import os
 import ast, re
 import numpy as np
@@ -28,17 +29,33 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
-         reduce_lr_patience, reduce_lr_factor, unet_layers, u_skip):
+         reduce_lr_patience, reduce_lr_factor, unet_layers, u_skip, loss,
+         cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
     limit_mem()
 
     # Open dataset and create data generators
-    ds = xr.merge(
-        [xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords')
-         for var in var_dict.keys()],
-        fill_value=0   # For the 'tisr' NaNs
-    )
+    if cmip:
+        # Load vars
+        tmp_dict = var_dict.copy()
+        constants = tmp_dict.pop('constants')
+        ds = xr.merge(
+            [xr.open_mfdataset(f'{cmip_dir}/{var}/*.nc', combine='by_coords')
+             for var in var_dict.keys()] +
+            [xr.open_mfdataset(f'{datadir}/constants/*.nc', combine='by_coords')]
+            ,
+            fill_value=0  # For the 'tisr' NaNs
+        )
+        ds['plev'] /= 100
+        ds = ds.rename({'plev': 'level'})
+    else:
+        ds = xr.merge(
+            [xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords')
+             for var in var_dict.keys()],
+            fill_value=0   # For the 'tisr' NaNs
+        )
+
 
     ds_train = ds.sel(time=slice(*train_years))
     ds_valid = ds.sel(time=slice(*valid_years))
@@ -60,20 +77,39 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
 
     # Build model
     if network_type == 'resnet':
-        print(filters, kernels)
         model = build_resnet(
-            filters, kernels, input_shape=(32, 64, len(dg_train.data.level) * nt_in),
+            filters, kernels, input_shape=(
+        len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
+    ),
             bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
             dropout=dropout
         )
     elif network_type == 'unet':
         model = build_unet(
-            input_shape=(32, 64, len(dg_train.data.level) * nt_in), n_layers=unet_layers,
+            input_shape=(
+                len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
+            ), n_layers=unet_layers,
             filters_start=filters[0], channels_out=filters[1], u_skip=u_skip, res_skip=skip,
             l2=l2, bn_position=bn_position, dropout=dropout
         )
 
-    model.compile(keras.optimizers.Adam(lr), 'mse')
+    if pretrained_model is not None:
+        pretrained_model = keras.models.load_model(pretrained_model,
+                                custom_objects={'PeriodicConv2D': PeriodicConv2D})
+        # Copy over weights
+        for i, l in enumerate(pretrained_model.layers):
+            model.layers[i].set_weights(l.get_weights())
+            if l.name == last_pretrained_layer: break
+
+        # Set trainable to false
+        if last_trainable_layer is not None:
+            for l in model.layers:
+                l.trainable = False
+                if l.name == last_trainable_layer: break
+
+    if loss == 'lat_mse':
+        loss = create_lat_mse(dg_train.data.lat)
+    model.compile(keras.optimizers.Adam(lr), loss, metrics=['mse'])
     print(model.summary())
 
 
@@ -112,13 +148,19 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
 
     # Create predictions
     preds = create_predictions(model, dg_test)
+    if len(preds.lat) != 32:
+        preds = regrid(preds, ddeg_out=5.625)
     print(f'Saving predictions: {pred_save_dir}/{exp_id}.nc')
     preds.to_netcdf(f'{pred_save_dir}/{exp_id}.nc')
 
     # Print score in real units
     # TODO: Make flexible for other states
-    z500_valid = load_test_data(f'{datadir}geopotential_500', 'z')
-    t850_valid = load_test_data(f'{datadir}temperature_850', 't')
+    if '5.625deg' in datadir:
+        valdir = datadir
+    else:
+        valdir = '/'.join(datadir.split('/')[:-2] + ['5.625deg/'])
+    z500_valid = load_test_data(f'{valdir}geopotential_500', 'z')
+    t850_valid = load_test_data(f'{valdir}temperature_850', 't')
     try:
         print(compute_weighted_rmse(preds.z, z500_valid).load())
     except:
@@ -147,11 +189,12 @@ if __name__ == '__main__':
     p.add_argument('--batch_size', type=int, default=64, help='batch_size')
     p.add_argument('--epochs', type=int, default=1000, help='epochs')
     p.add_argument('--early_stopping_patience', type=int, default=None, help='Early stopping patience')
-    p.add_argument('--restore_best_weights', type=bool, default=True, help='ES parameter')
+    p.add_argument('--restore_best_weights', type=int, default=1, help='ES parameter')
     p.add_argument('--reduce_lr_patience', type=int, default=None, help='Reduce LR patience')
     p.add_argument('--reduce_lr_factor', type=float, default=0.2, help='Reduce LR factor')
     p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
     p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
+    p.add_argument('--loss', type=str, default='mse', help='Loss function')
     p.add_argument('--train_years', type=str, nargs='+', default=('1979', '2015'), help='Start/stop years for training')
     p.add_argument('--valid_years', type=str, nargs='+', default=('2016', '2016'), help='Start/stop years for validation')
     p.add_argument('--test_years', type=str, nargs='+', default=('2017', '2018'), help='Start/stop years for testing')
@@ -162,12 +205,18 @@ if __name__ == '__main__':
     p.add_argument('--bn_position', type=str, default=None, help='pre, mid or post')
     p.add_argument('--nt_in', type=int, default=1, help='Number of input time steps')
     p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
-    p.add_argument('--use_bias', type=bool, default=True, help='Use bias in resnet convs')
+    p.add_argument('--use_bias', type=int, default=1, help='Use bias in resnet convs')
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
     p.add_argument('--dropout', type=float, default=0, help='Dropout')
-    p.add_argument('--skip', type=bool, default=True, help='Add skip convs in resnet builder')
-    p.add_argument('--u_skip', type=bool, default=True, help='Add skip convs in unet')
+    p.add_argument('--skip', type=int, default=1, help='Add skip convs in resnet builder')
+    p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')
     p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
+    p.add_argument('--cmip', type=int, default=0, help='Is CMIP')
+    p.add_argument('--cmip_dir', type=str, default=None, help='Dir for CMIP data')
+    p.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model')
+    p.add_argument('--last_pretrained_layer', type=str, default=None, help='Name of last pretrained layer')
+    p.add_argument('--last_trainable_layer', type=str, default=None, help='Name of last trainable layer')
+
     args = p.parse_args()
 
     main(
@@ -206,5 +255,11 @@ if __name__ == '__main__':
         reduce_lr_patience=args.reduce_lr_patience,
         reduce_lr_factor=args.reduce_lr_factor,
         u_skip=args.u_skip,
-        unet_layers=args.unet_layers
+        unet_layers=args.unet_layers,
+        loss=args.loss,
+        cmip=args.cmip,
+        cmip_dir=args.cmip_dir,
+        pretrained_model=args.pretrained_model,
+        last_pretrained_layer=args.last_pretrained_layer,
+        last_trainable_layer=args.last_trainable_layer
     )

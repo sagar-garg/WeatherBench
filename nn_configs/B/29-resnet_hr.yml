@@ -1,5 +1,5 @@
-exp_id: 13-resnet_bn_dr_0.1
-datadir: /data/stephan/WeatherBench/5.625deg/
+exp_id: 29-resnet_hr
+datadir: /data/stephan/WeatherBench/2.8125deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
 var_dict: {'geopotential': ('z', [200, 500, 850]), 'temperature': ('t', [200, 500, 850]), 'u_component_of_wind': ('u', [200, 500, 850]), 'v_component_of_wind': ('v', [200, 500, 850]), 'constants': ['lsm','orography','lat2d']}
@@ -15,3 +15,4 @@ norm_subsample: 30000
 bn_position: post
 use_bias: False
 dropout: 0.1
+batch_size: 32
