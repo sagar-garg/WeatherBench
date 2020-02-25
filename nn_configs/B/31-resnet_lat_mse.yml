@@ -1,4 +1,4 @@
-exp_id: 13-resnet_bn_dr_0.1
+exp_id: 31-resnet_lat_mse
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -13,5 +13,6 @@ reduce_lr_patience: 5
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
-use_bias: False
+use_bias: 0
 dropout: 0.1
+loss: lat_mse

@@ -2,6 +2,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.layers import *
 from tensorflow.keras import regularizers
+import numpy as np
 
 def limit_mem():
     config = tf.compat.v1.ConfigProto()
@@ -166,4 +167,14 @@ def build_unet(input_shape, n_layers, filters_start, channels_out, kernel=3, u_s
 
     x = PeriodicConv2D(channels_out, 1, conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
     return keras.models.Model(input, x)
+
+
+def create_lat_mse(lat):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def lat_mse(y_true, y_pred):
+        error = y_true - y_pred
+        mse = (error)**2 * weights_lat[None, : , None, None]
+        return mse
+    return lat_mse
 
