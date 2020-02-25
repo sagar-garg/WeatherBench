@@ -9,7 +9,9 @@ def regrid(
         ds_in,
         ddeg_out,
         method='bilinear',
-        reuse_weights=True
+        reuse_weights=True,
+        cmip=False,
+        rename=None
 ):
     """
     Regrid horizontally.
@@ -19,9 +21,14 @@ def regrid(
     :param reuse_weights: Reuse weights for regridding
     :return: ds_out: Regridded dataset
     """
+    # import pdb; pdb.set_trace()
     # Rename to ESMF compatible coordinates
     if 'latitude' in ds_in.coords:
         ds_in = ds_in.rename({'latitude': 'lat', 'longitude': 'lon'})
+    if cmip:
+        ds_in = ds_in.drop(('lat_bnds', 'lon_bnds'))
+    if rename:
+        ds_in = ds_in.rename({rename[0]: rename[1]})
 
     # Create output grid
     grid_out = xr.Dataset(
@@ -50,6 +57,9 @@ def regrid(
         ds_out[var].attrs =  ds_in[var].attrs
     ds_out.attrs.update(ds_in.attrs)
 
+    if rename[0] == 'zg':
+        ds_out['z'] *= 9.807
+
     # # Regrid dataset
     # ds_out = regridder(ds_in)
     return ds_out
@@ -62,7 +72,9 @@ def main(
         method='bilinear',
         reuse_weights=True,
         custom_fn=None,
-        file_ending='nc'
+        file_ending='nc',
+        cmip=False,
+        rename=None
 ):
     """
     :param input_fns: Input files. Can use *. If more than one, loop over them
@@ -82,7 +94,7 @@ def main(
     for fn in input_fns:
         print(f'Regridding file: {fn}')
         ds_in = xr.open_dataset(fn)
-        ds_out = regrid(ds_in, ddeg_out, method, reuse_weights)
+        ds_out = regrid(ds_in, ddeg_out, method, reuse_weights, cmip, rename)
         fn_out = (
             custom_fn or
             '_'.join(fn.split('/')[-1][:-3].split('_')[:-1]) + '_' + str(ddeg_out) + 'deg.' + file_ending
@@ -131,6 +143,19 @@ if __name__ == '__main__':
         help="File ending. Default = nc",
         default='nc'
     )
+    parser.add_argument(
+        '--cmip',
+        type=int,
+        help="Is CMIP data. 0 or 1 (default)",
+        default=0
+    )
+    parser.add_argument(
+        '--rename',
+        type=str,
+        nargs='+',
+        help="Rename var in dataset",
+        default=None
+    )
     args = parser.parse_args()
 
     main(
@@ -139,7 +164,9 @@ if __name__ == '__main__':
         ddeg_out=args.ddeg_out,
         reuse_weights=args.reuse_weights,
         custom_fn=args.custom_fn,
-        file_ending=args.file_ending
+        file_ending=args.file_ending,
+        cmip=args.cmip,
+        rename=args.rename
     )
 
 
