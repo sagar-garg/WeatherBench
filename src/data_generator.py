@@ -21,6 +21,10 @@ class DataGenerator(keras.utils.Sequence):
             load: bool. If True, datadet is loaded into RAM.
             mean: If None, compute mean from data.
             std: If None, compute standard deviation from data.
+            data_subsample: Only take every ith time step
+            norm_subsample: Same for normalization. This is AFTER data_subsample!
+            nt_in: How many time steps for input. AFTER data_subsample!
+            dt_in: Interval of input time steps. AFTER data_subsample!
         """
         print('DG start', datetime.datetime.now().time())
         self.ds = ds

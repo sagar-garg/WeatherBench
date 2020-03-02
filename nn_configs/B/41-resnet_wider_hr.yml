@@ -1,0 +1,17 @@
+exp_id: 41-resnet_wider_hr
+datadir: /data/stephan/WeatherBench/2.8125deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [200, 500, 850]), 'temperature': ('t', [200, 500, 850]), 'u_component_of_wind': ('u', [200, 500, 850]), 'v_component_of_wind': ('v', [200, 500, 850]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+filters: [64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 2]
+kernels: [7, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 3]
+lead_time: 72
+lr: 0.5e-4
+early_stopping_patience: 10
+reduce_lr_patience: 5
+data_subsample: 2
+norm_subsample: 30000
+bn_position: post
+dropout: 0.1
+batch_size: 16

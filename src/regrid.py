@@ -27,7 +27,7 @@ def regrid(
         ds_in = ds_in.rename({'latitude': 'lat', 'longitude': 'lon'})
     if cmip:
         ds_in = ds_in.drop(('lat_bnds', 'lon_bnds'))
-    if rename:
+    if rename is not None:
         ds_in = ds_in.rename({rename[0]: rename[1]})
 
     # Create output grid
@@ -57,8 +57,9 @@ def regrid(
         ds_out[var].attrs =  ds_in[var].attrs
     ds_out.attrs.update(ds_in.attrs)
 
-    if rename[0] == 'zg':
-        ds_out['z'] *= 9.807
+    if rename is not None:
+        if rename[0] == 'zg':
+            ds_out['z'] *= 9.807
 
     # # Regrid dataset
     # ds_out = regridder(ds_in)

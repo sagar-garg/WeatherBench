@@ -1,0 +1,7 @@
+datadir: /media/rasp/Elements/CMIP/EC-Earth
+name: u_component_of_wind
+cmip_name: ua
+era_name: u
+res:
+  - 2.8125
+  - 5.625

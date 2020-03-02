@@ -4,7 +4,7 @@ Functions for evaluating forecasts.
 import numpy as np
 import xarray as xr
 
-def load_test_data(path, var, years=slice('2017', '2018')):
+def load_test_data(path, var, years=slice('2017', '2018'), cmip=False):
     """
     Args:
         path: Path to nc files
@@ -16,6 +16,9 @@ def load_test_data(path, var, years=slice('2017', '2018')):
     """
     assert var in ['z', 't'], 'Test data only for Z500 and T850'
     ds = xr.open_mfdataset(f'{path}/*.nc', combine='by_coords')[var]
+    if cmip:
+        ds['plev'] /= 100
+        ds = ds.rename({'plev': 'level'})
     try:
         ds = ds.sel(level=500 if var == 'z' else 850).drop('level')
     except ValueError:

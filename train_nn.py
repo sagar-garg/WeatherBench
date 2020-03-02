@@ -29,7 +29,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
-         reduce_lr_patience, reduce_lr_factor, unet_layers, u_skip, loss,
+         reduce_lr_patience, reduce_lr_factor, min_lr_times, unet_layers, u_skip, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer):
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     # Limit TF memory usage
@@ -42,7 +42,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
         constants = tmp_dict.pop('constants')
         ds = xr.merge(
             [xr.open_mfdataset(f'{cmip_dir}/{var}/*.nc', combine='by_coords')
-             for var in var_dict.keys()] +
+             for var in tmp_dict.keys()] +
             [xr.open_mfdataset(f'{datadir}/constants/*.nc', combine='by_coords')]
             ,
             fill_value=0  # For the 'tisr' NaNs
@@ -126,7 +126,8 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
         callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(
             patience=reduce_lr_patience,
             factor=reduce_lr_factor,
-            verbose=1
+            verbose=1,
+            min_lr=reduce_lr_factor**min_lr_times*lr
         ))
     if lr_step is not None:
         callbacks.append(keras.callbacks.LearningRateScheduler(
@@ -155,12 +156,20 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
 
     # Print score in real units
     # TODO: Make flexible for other states
+
+    if cmip: datadir = cmip_dir
     if '5.625deg' in datadir:
         valdir = datadir
     else:
         valdir = '/'.join(datadir.split('/')[:-2] + ['5.625deg/'])
-    z500_valid = load_test_data(f'{valdir}geopotential_500', 'z')
-    t850_valid = load_test_data(f'{valdir}temperature_850', 't')
+    if cmip:
+        z500_valid = load_test_data(
+            f'{valdir}geopotential', 'z', years=slice(test_years[0], test_years[1]))
+        t850_valid = load_test_data(
+            f'{valdir}temperature', 't', years=slice(test_years[0], test_years[1]))
+    else:
+        z500_valid = load_test_data(f'{valdir}geopotential_500', 'z')
+        t850_valid = load_test_data(f'{valdir}temperature_850', 't')
     try:
         print(compute_weighted_rmse(preds.z, z500_valid).load())
     except:
@@ -192,6 +201,7 @@ if __name__ == '__main__':
     p.add_argument('--restore_best_weights', type=int, default=1, help='ES parameter')
     p.add_argument('--reduce_lr_patience', type=int, default=None, help='Reduce LR patience')
     p.add_argument('--reduce_lr_factor', type=float, default=0.2, help='Reduce LR factor')
+    p.add_argument('--min_lr_times', type=int, default=1, help='Reduce LR patience')
     p.add_argument('--lr_step', type=int, default=None, help='LR decay step')
     p.add_argument('--lr_divide', type=int, default=None, help='LR decay division factor')
     p.add_argument('--loss', type=str, default='mse', help='Loss function')
@@ -254,6 +264,7 @@ if __name__ == '__main__':
         dropout=args.dropout,
         reduce_lr_patience=args.reduce_lr_patience,
         reduce_lr_factor=args.reduce_lr_factor,
+        min_lr_times=args.min_lr_times,
         u_skip=args.u_skip,
         unet_layers=args.unet_layers,
         loss=args.loss,

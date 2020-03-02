@@ -178,3 +178,41 @@ def create_lat_mse(lat):
         return mse
     return lat_mse
 
+
+### Scher
+def build_scher_model(conv_depth, kernel_size, hidden_size, n_hidden_layers, lr):
+    model = keras.Sequential([
+
+                                 ## Convolution with dimensionality reduction (similar to Encoder in an autoencoder)
+                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation,
+                                               input_shape=(Nlat, Nlon, n_channels)),
+                                 layers.MaxPooling2D(pool_size=pool_size),
+                                 Dropout(drop_prob),
+                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
+                                 layers.MaxPooling2D(pool_size=pool_size),
+                                 # end "encoder"
+
+                                 # dense layers (flattening and reshaping happens automatically)
+                             ] + [layers.Dense(hidden_size, activation='sigmoid') for i in range(n_hidden_layers)] +
+
+                             [
+
+                                 # start "Decoder" (mirror of the encoder above)
+                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
+                                 layers.UpSampling2D(size=pool_size),
+                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
+                                 layers.UpSampling2D(size=pool_size),
+                                 layers.Convolution2D(n_channels, kernel_size, padding='same', activation=None)
+                             ]
+                             )
+
+    optimizer = keras.optimizers.adam(lr=lr)
+
+    if N_gpu > 1:
+        with tf.device("/cpu:0"):
+            # convert the model to a model that can be trained with N_GPU GPUs
+            model = keras.utils.multi_gpu_model(model, gpus=N_gpu)
+
+    model.compile(loss='mean_squared_error', optimizer=optimizer)
+
+    return model

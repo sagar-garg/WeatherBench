@@ -1,4 +1,4 @@
-datadir: /media/rasp/Elements/CMIP
+datadir: /media/rasp/Elements/CMIP/EC-Earth
 name: temperature
 cmip_name: ta
 era_name: t
