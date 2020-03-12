@@ -1,4 +1,4 @@
-datadir: /data/stephan/WeatherBench/CMIP/MPI-ESM
+datadir: /data/stephan/WeatherBench/CMIP/MIROC6
 name: geopotential
 cmip_name: zg
 era_name: z

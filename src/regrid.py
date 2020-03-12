@@ -27,6 +27,10 @@ def regrid(
         ds_in = ds_in.rename({'latitude': 'lat', 'longitude': 'lon'})
     if cmip:
         ds_in = ds_in.drop(('lat_bnds', 'lon_bnds'))
+        try:
+            ds_in = ds_in.drop(('plev_bnds'))
+        except ValueError:
+            pass
     if rename is not None:
         ds_in = ds_in.rename({rename[0]: rename[1]})
 

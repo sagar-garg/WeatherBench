@@ -1,4 +1,4 @@
-datadir: /data/stephan/WeatherBench/CMIP/MPI-ESM
+datadir: /data/stephan/WeatherBench/CMIP/MRI-ESM
 name: temperature
 cmip_name: ta
 era_name: t

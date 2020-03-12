@@ -179,40 +179,68 @@ def create_lat_mse(lat):
     return lat_mse
 
 
-### Scher
-def build_scher_model(conv_depth, kernel_size, hidden_size, n_hidden_layers, lr):
-    model = keras.Sequential([
+# Agrawal et al version
+def basic_block(x, filters, dropout):
+    shortcut = x
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-                                 ## Convolution with dimensionality reduction (similar to Encoder in an autoencoder)
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation,
-                                               input_shape=(Nlat, Nlon, n_channels)),
-                                 layers.MaxPooling2D(pool_size=pool_size),
-                                 Dropout(drop_prob),
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.MaxPooling2D(pool_size=pool_size),
-                                 # end "encoder"
+    shortcut = PeriodicConv2D(filters, kernel_size=3)(shortcut)
+    return Add()([x, shortcut])
 
-                                 # dense layers (flattening and reshaping happens automatically)
-                             ] + [layers.Dense(hidden_size, activation='sigmoid') for i in range(n_hidden_layers)] +
 
-                             [
+def downsample_block(x, filters, dropout):
+    shortcut = x
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = MaxPooling2D()(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-                                 # start "Decoder" (mirror of the encoder above)
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.UpSampling2D(size=pool_size),
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.UpSampling2D(size=pool_size),
-                                 layers.Convolution2D(n_channels, kernel_size, padding='same', activation=None)
-                             ]
-                             )
+    shortcut = PeriodicConv2D(filters, kernel_size=3, conv_kwargs={'strides': 2})(shortcut)
+    return Add()([x, shortcut])
 
-    optimizer = keras.optimizers.adam(lr=lr)
 
-    if N_gpu > 1:
-        with tf.device("/cpu:0"):
-            # convert the model to a model that can be trained with N_GPU GPUs
-            model = keras.utils.multi_gpu_model(model, gpus=N_gpu)
+def upsample_block(x, from_down, filters, dropout):
+    x = Concatenate()([x, from_down])
+    x = UpSampling2D()(x)
+    shortcut = x
 
-    model.compile(loss='mean_squared_error', optimizer=optimizer)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-    return model
+    shortcut = PeriodicConv2D(filters, kernel_size=3)(shortcut)
+    return Add()([x, shortcut])
+
+
+def build_unet_google(filters, input_shape, output_channels, dropout=0):
+    inputs = x = Input(input_shape)
+    x = basic_block(x, filters[0], dropout=dropout)
+
+    # Encoder
+    from_down = []
+    for f in filters[:-1]:
+        x = downsample_block(x, f, dropout=dropout)
+        from_down.append(x)
+
+    # Bottleneck
+    x = basic_block(x, filters[-1], dropout=dropout)
+
+    # Decoder
+    for f, d in zip(filters[:-1][::-1], from_down[::-1]):
+        x = upsample_block(x, d, f, dropout=dropout)
+
+    # Final
+    outputs = PeriodicConv2D(output_channels, kernel_size=1)(x)
+
+    return keras.models.Model(inputs, outputs)

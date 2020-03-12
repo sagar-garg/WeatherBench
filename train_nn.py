@@ -30,10 +30,15 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unet_layers, u_skip, loss,
-         cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer):
-    os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
-    # Limit TF memory usage
-    limit_mem()
+         cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer, min_es_delta, optimizer):
+
+    # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
+    # # Limit TF memory usage
+    # limit_mem()
+    os.environ["CUDA_VISIBLE_DEVICES"] = ','.join([str(g) for g in gpu])
+    mirrored_strategy = tf.distribute.MirroredStrategy(
+        devices=[f"/gpu:{i}" for i, g in enumerate(gpu)]
+    )
 
     # Open dataset and create data generators
     if cmip:
@@ -76,41 +81,47 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
     print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
 
     # Build model
-    if network_type == 'resnet':
-        model = build_resnet(
-            filters, kernels, input_shape=(
-        len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
-    ),
-            bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
-            dropout=dropout
-        )
-    elif network_type == 'unet':
-        model = build_unet(
-            input_shape=(
-                len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
-            ), n_layers=unet_layers,
-            filters_start=filters[0], channels_out=filters[1], u_skip=u_skip, res_skip=skip,
-            l2=l2, bn_position=bn_position, dropout=dropout
-        )
-
     if pretrained_model is not None:
-        pretrained_model = keras.models.load_model(pretrained_model,
-                                custom_objects={'PeriodicConv2D': PeriodicConv2D})
-        # Copy over weights
-        for i, l in enumerate(pretrained_model.layers):
-            model.layers[i].set_weights(l.get_weights())
-            if l.name == last_pretrained_layer: break
+        pretrained_model = keras.models.load_model(
+            pretrained_model, custom_objects={'PeriodicConv2D': PeriodicConv2D})
 
-        # Set trainable to false
-        if last_trainable_layer is not None:
-            for l in model.layers:
-                l.trainable = False
-                if l.name == last_trainable_layer: break
+    with mirrored_strategy.scope():
+        if network_type == 'resnet':
+            model = build_resnet(
+                filters, kernels, input_shape=(
+            len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
+        ),
+                bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
+                dropout=dropout
+            )
+        elif network_type == 'unet_google':
+            model = build_unet_google(
+                filters,
+                input_shape=(len(dg_train.data.lat), len(dg_train.data.lon),len(dg_train.data.level) * nt_in),
+                output_channels=len(dg_train.output_idxs),
+                dropout=dropout
+                )
 
-    if loss == 'lat_mse':
-        loss = create_lat_mse(dg_train.data.lat)
-    model.compile(keras.optimizers.Adam(lr), loss, metrics=['mse'])
-    print(model.summary())
+        if pretrained_model is not None:
+            # Copy over weights
+            for i, l in enumerate(pretrained_model.layers):
+                model.layers[i].set_weights(l.get_weights())
+                if l.name == last_pretrained_layer: break
+
+            # Set trainable to false
+            if last_trainable_layer is not None:
+                for l in model.layers:
+                    l.trainable = False
+                    if l.name == last_trainable_layer: break
+
+        if loss == 'lat_mse':
+            loss = create_lat_mse(dg_train.data.lat)
+        if optimizer == 'adam':
+            opt = keras.optimizers.Adam(lr)
+        elif optimizer =='adadelta':
+            opt = keras.optimizers.Adadelta(lr)
+        model.compile(opt, loss, metrics=['mse'])
+        print(model.summary())
 
 
     # Learning rate settings
@@ -119,6 +130,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
         callbacks.append(tf.keras.callbacks.EarlyStopping(
           patience=early_stopping_patience,
           verbose=1,
+          min_delta=min_es_delta,
           mode='auto',
           restore_best_weights=restore_best_weights
                       ))
@@ -127,7 +139,7 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
             patience=reduce_lr_patience,
             factor=reduce_lr_factor,
             verbose=1,
-            min_lr=reduce_lr_factor**min_lr_times*lr
+            min_lr=reduce_lr_factor**min_lr_times*lr,
         ))
     if lr_step is not None:
         callbacks.append(keras.callbacks.LearningRateScheduler(
@@ -145,7 +157,9 @@ def main(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, early
     model.save_weights(f'{model_save_dir}/{exp_id}_weights.h5')
     print(f'Saving training_history: {model_save_dir}/{exp_id}_history.pkl')
     to_pickle(history.history, f'{model_save_dir}/{exp_id}_history.pkl')
-
+    print(f'Saving norm files: {model_save_dir}/{exp_id}_mean.nc and {model_save_dir}/{exp_id}_std.nc')
+    dg_train.mean.to_netcdf(f'{model_save_dir}/{exp_id}_mean.nc')
+    dg_train.std.to_netcdf(f'{model_save_dir}/{exp_id}_std.nc')
 
     # Create predictions
     preds = create_predictions(model, dg_test)
@@ -197,7 +211,9 @@ if __name__ == '__main__':
     # p.add_argument('--activation', type=str, default='relu', help='Activation function')
     p.add_argument('--batch_size', type=int, default=64, help='batch_size')
     p.add_argument('--epochs', type=int, default=1000, help='epochs')
+    p.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
     p.add_argument('--early_stopping_patience', type=int, default=None, help='Early stopping patience')
+    p.add_argument('--min_es_delta', type=float, default=0, help='Minimum improvement for earlly stopping')
     p.add_argument('--restore_best_weights', type=int, default=1, help='ES parameter')
     p.add_argument('--reduce_lr_patience', type=int, default=None, help='Reduce LR patience')
     p.add_argument('--reduce_lr_factor', type=float, default=0.2, help='Reduce LR factor')
@@ -210,7 +226,7 @@ if __name__ == '__main__':
     p.add_argument('--test_years', type=str, nargs='+', default=('2017', '2018'), help='Start/stop years for testing')
     p.add_argument('--data_subsample', type=int, default=1, help='Subsampling for training data')
     p.add_argument('--norm_subsample', type=int, default=1, help='Subsampling for mean/std')
-    p.add_argument('--gpu', type=int, default=0, help='Which GPU')
+    p.add_argument('--gpu', type=int, default=0, help='Which GPU', nargs='+')
     p.add_argument('--network_type', type=str, default='resnet', help='Type')
     p.add_argument('--bn_position', type=str, default=None, help='pre, mid or post')
     p.add_argument('--nt_in', type=int, default=1, help='Number of input time steps')
@@ -272,5 +288,7 @@ if __name__ == '__main__':
         cmip_dir=args.cmip_dir,
         pretrained_model=args.pretrained_model,
         last_pretrained_layer=args.last_pretrained_layer,
-        last_trainable_layer=args.last_trainable_layer
+        last_trainable_layer=args.last_trainable_layer,
+        min_es_delta=args.min_es_delta,
+        optimizer=args.optimizer
     )

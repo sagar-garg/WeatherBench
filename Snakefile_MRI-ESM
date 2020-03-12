@@ -10,7 +10,7 @@
 #     '199001010600-201001010000',
 #     '201001010600-201501010000'
 # ]
-year_strings = [f'{y}01010600-{y+5}01010000' for y in range(1850, 2015, 5)]
+year_strings = [f'{y}01010600-{y}12311800' for y in range(1950, 2015, 1)]
 
 print(config)
 
@@ -18,10 +18,10 @@ rule download:
     output:
           "{dataset}/raw/{name}/{name}_{year_str}_raw.nc",
     shell:
-         "wget http://esgf3.dkrz.de/thredds/fileServer/cmip6/CMIP/MPI-M/MPI-ESM1-2-HR/historical/{config["
+         "wget http://esgf-data2.diasjp.net/thredds/fileServer/esg_dataroot/CMIP6/CMIP/MRI/MRI-ESM2-0/historical/{config["
          "run]}/6hrPlevPt/"
-         "{config[cmip_name]}/gn/v20190710/"
-         "{config[cmip_name]}_6hrPlevPt_MPI-ESM1-2-HR_historical_{config[run]}_gn_{wildcards.year_str}.nc "
+         "{config[cmip_name]}/gn/v20190722/"
+         "{config[cmip_name]}_6hrPlevPt_MRI-ESM2-0_historical_{config[run]}_gn_{wildcards.year_str}.nc "
          "-O {wildcards.dataset}/raw/{config[name]}/{config[name]}_{wildcards.year_str}_raw.nc"
 
 rule regrid:
