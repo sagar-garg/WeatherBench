@@ -1,3 +1,8 @@
 __pycache__
 .idea
 .ipynb_checkpoints
+bilinear_*
+.snakemake
+._.DS_Store
+.vscode
+.DS_Store

@@ -4,6 +4,7 @@ from tensorflow.keras.layers import *
 from tensorflow.keras import regularizers
 import numpy as np
 
+
 def limit_mem():
     config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -83,37 +84,37 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
         }
     )(x)
     if bn_position == 'mid': x = BatchNormalization()(x)
-    x = Activation(activation)(x)
+    x = LeakyReLU()(x) if activation == 'leakyrelu' else Activation(activation)(x) 
     if bn_position == 'post': x = BatchNormalization()(x)
     if dropout > 0: x = Dropout(dropout)(x)
     return x
 
 def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
-             dropout=0, skip=True):
+             dropout=0, skip=True, activation='relu'):
     x = inputs
     for _ in range(2):
         x = convblock(
             x, filters, kernel, bn_position=bn_position, l2=l2, use_bias=use_bias,
-            dropout=dropout
+            dropout=dropout, activation=activation
         )
     if skip: x = Add()([inputs, x])
     return x
 
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
-                 skip=True, dropout=0):
+                 skip=True, dropout=0, activation='relu'):
     x = input = Input(shape=input_shape)
 
     # First conv block to get up to shape
     x = convblock(
         x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
-        dropout=dropout
+        dropout=dropout, activation=activation
     )
 
     # Resblocks
     for f, k in zip(filters[1:-1], kernels[1:-1]):
         x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
-                dropout=dropout, skip=skip)
+                dropout=dropout, skip=skip, activation=activation)
 
     # Final convolution
     output = PeriodicConv2D(
