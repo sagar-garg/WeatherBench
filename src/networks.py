@@ -5,6 +5,7 @@ from tensorflow.keras import regularizers
 import numpy as np
 
 
+
 def limit_mem():
     config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = True
