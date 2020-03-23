@@ -3,7 +3,7 @@ import tensorflow.keras as keras
 from tensorflow.keras.layers import *
 from tensorflow.keras import regularizers
 import numpy as np
-#tf.enable_eager_execution() #added. so as to be able to use numpy arrays easily
+
 def limit_mem():
     config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -82,18 +82,18 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
         }
     )(x)
     if bn_position == 'mid': x = BatchNormalization()(x)
-    x = Activation(activation)(x)
+    x = LeakyReLU()(x) if activation == 'leakyrelu' else Activation(activation)(x) 
     if bn_position == 'post': x = BatchNormalization()(x)
     if dropout > 0: x = Dropout(dropout)(x)
     return x
 
 def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
-             dropout=0, skip=True):
+             dropout=0, skip=True, activation='relu'):
     x = inputs
     for _ in range(2):
         x = convblock(
             x, filters, kernel, bn_position=bn_position, l2=l2, use_bias=use_bias,
-            dropout=dropout
+            dropout=dropout, activation=activation
         )
     if skip: x = Add()([inputs, x])
     return x
@@ -101,19 +101,19 @@ def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
 
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
-                 skip=True, dropout=0):
+                 skip=True, dropout=0, activation='relu'):
     x = input = Input(shape=input_shape)
 
     # First conv block to get up to shape
     x = convblock(
         x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
-        dropout=dropout
+        dropout=dropout, activation=activation
     )
 
     # Resblocks
     for f, k in zip(filters[1:-1], kernels[1:-1]):
         x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
-                dropout=dropout, skip=skip)
+                dropout=dropout, skip=skip, activation=activation)
 
     # Final convolution
     output = PeriodicConv2D(
@@ -179,40 +179,68 @@ def create_lat_mse(lat):
     return lat_mse
 
 
-### Scher
-def build_scher_model(conv_depth, kernel_size, hidden_size, n_hidden_layers, lr):
-    model = keras.Sequential([
+# Agrawal et al version
+def basic_block(x, filters, dropout):
+    shortcut = x
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-                                 ## Convolution with dimensionality reduction (similar to Encoder in an autoencoder)
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation,
-                                               input_shape=(Nlat, Nlon, n_channels)),
-                                 layers.MaxPooling2D(pool_size=pool_size),
-                                 Dropout(drop_prob),
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.MaxPooling2D(pool_size=pool_size),
-                                 # end "encoder"
+    shortcut = PeriodicConv2D(filters, kernel_size=3)(shortcut)
+    return Add()([x, shortcut])
 
-                                 # dense layers (flattening and reshaping happens automatically)
-                             ] + [layers.Dense(hidden_size, activation='sigmoid') for i in range(n_hidden_layers)] +
 
-                             [
+def downsample_block(x, filters, dropout):
+    shortcut = x
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = MaxPooling2D()(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-                                 # start "Decoder" (mirror of the encoder above)
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.UpSampling2D(size=pool_size),
-                                 Convolution2D(conv_depth, kernel_size, padding='same', activation=conv_activation),
-                                 layers.UpSampling2D(size=pool_size),
-                                 layers.Convolution2D(n_channels, kernel_size, padding='same', activation=None)
-                             ]
-                             )
+    shortcut = PeriodicConv2D(filters, kernel_size=3, conv_kwargs={'strides': 2})(shortcut)
+    return Add()([x, shortcut])
 
-    optimizer = keras.optimizers.adam(lr=lr)
 
-    if N_gpu > 1:
-        with tf.device("/cpu:0"):
-            # convert the model to a model that can be trained with N_GPU GPUs
-            model = keras.utils.multi_gpu_model(model, gpus=N_gpu)
+def upsample_block(x, from_down, filters, dropout):
+    x = Concatenate()([x, from_down])
+    x = UpSampling2D()(x)
+    shortcut = x
 
-    model.compile(loss='mean_squared_error', optimizer=optimizer)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    x = BatchNormalization()(x)
+    x = LeakyReLU()(x)
+    x = PeriodicConv2D(filters, kernel_size=3)(x)
+    if dropout > 0: x = Dropout(dropout)(x)
 
-    return model
+    shortcut = PeriodicConv2D(filters, kernel_size=3)(shortcut)
+    return Add()([x, shortcut])
+
+
+def build_unet_google(filters, input_shape, output_channels, dropout=0):
+    inputs = x = Input(input_shape)
+    x = basic_block(x, filters[0], dropout=dropout)
+
+    # Encoder
+    from_down = []
+    for f in filters[:-1]:
+        x = downsample_block(x, f, dropout=dropout)
+        from_down.append(x)
+
+    # Bottleneck
+    x = basic_block(x, filters[-1], dropout=dropout)
+
+    # Decoder
+    for f, d in zip(filters[:-1][::-1], from_down[::-1]):
+        x = upsample_block(x, d, f, dropout=dropout)
+
+    # Final
+    outputs = PeriodicConv2D(output_channels, kernel_size=1)(x)
+
+    return keras.models.Model(inputs, outputs)

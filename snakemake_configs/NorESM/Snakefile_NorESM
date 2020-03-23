@@ -1,16 +1,14 @@
 
 year_strings = [
-    '185001010600-187001010000',
-    '187001010600-189001010000',
-    '189001010600-191001010000',
-    '191001010600-193001010000',
-    '193001010600-195001010000',
-    '195001010600-197001010000',
-    '197001010600-199001010000',
-    '199001010600-201001010000',
-    '201001010600-201501010000'
+    '195001010300-195912312100',
+    '196001010300-196912312100',
+    '197001010300-197912312100',
+    '198001010300-198912312100',
+    '199001010300-199912312100',
+    '200001010300-200912312100',
+    '201001010300-201412312100',
 ]
-
+# year_strings = [f'{y}01010600-{y+1}01010000' for y in range(1850, 2015, 1)]
 
 print(config)
 
@@ -18,9 +16,10 @@ rule download:
     output:
           "{dataset}/raw/{name}/{name}_{year_str}_raw.nc",
     shell:
-         "wget http://esgf3.dkrz.de/thredds/fileServer/cmip6/CMIP/MPI-M/MPI-ESM1-2-LR/historical/r5i1p1f1/6hrPlevPt/"
-         "{config[cmip_name]}/gn/v20190710/"
-         "{config[cmip_name]}_6hrPlevPt_MPI-ESM1-2-LR_historical_r5i1p1f1_gn_{wildcards.year_str}.nc "
+         "wget http://noresg.nird.sigma2.no/thredds/fileServer/esg_dataroot/cmor/CMIP6/CMIP/NCC/NorESM2-MM/historical/{config["
+         "run]}/6hrPlevPt/"
+         "{config[cmip_name]}/gn/v20191108/"
+         "{config[cmip_name]}_6hrPlevPt_NorESM2-MM_historical_{config[run]}_gn_{wildcards.year_str}.nc "
          "-O {wildcards.dataset}/raw/{config[name]}/{config[name]}_{wildcards.year_str}_raw.nc"
 
 rule regrid:
@@ -29,7 +28,7 @@ rule regrid:
     output:
           "{dataset}/{res}deg/{name}/{name}_{year_str}_{res}deg.nc.tmp"
     shell:
-          "python src/regrid.py \
+          "python ../../src/regrid.py \
             --input_fns {input} \
             --output_dir {wildcards.dataset}/{wildcards.res}deg/{wildcards.name} \
             --ddeg_out {wildcards.res} \

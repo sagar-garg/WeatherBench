@@ -56,3 +56,25 @@ def evaluate_iterative_forecast(fc_iter, da_valid):
     # return xr.DataArray(rmses, dims=['lead_time'], coords={'lead_time': fc_iter.lead_time})
 
 
+def compute_weighted_acc(da_fc, da_true):
+    clim = da_true.mean('time')
+    t = np.intersect1d(da_fc.time, da_true.time)
+    fa = da_fc.sel(time=t) - clim
+    a = da_true.sel(time=t) - clim
+    
+    weights_lat = np.cos(np.deg2rad(da_fc.lat))
+    weights_lat /= weights_lat.mean()
+    w = weights_lat
+    
+    fa_prime = fa - fa.mean()
+    a_prime = a - a.mean()
+    
+    acc = (
+        np.sum(w * fa_prime * a_prime) /
+        np.sqrt(
+            np.sum(w * fa_prime**2) * np.sum(w * a_prime**2)
+        )
+    )
+    return acc
+
+

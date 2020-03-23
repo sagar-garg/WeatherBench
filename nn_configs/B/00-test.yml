@@ -1,0 +1,16 @@
+exp_id: 00-test
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [500]), 'temperature': ('t', [850]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+filters: [128, 2]
+kernels: [7, 3]
+lead_time: 72
+lr: 0.5e-4
+epochs: 0
+early_stopping_patience: 10
+reduce_lr_patience: 5
+data_subsample: 2
+norm_subsample: 30000
+train_years: [2016, 2016]
