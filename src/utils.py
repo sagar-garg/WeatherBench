@@ -4,6 +4,19 @@ import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 from glob import glob
+import sys
+
+def in_notebook():
+    """
+    Returns ``True`` if the module is running in IPython kernel,
+    ``False`` if in IPython shell or other Python shell.
+    """
+    return 'ipykernel' in sys.modules
+
+if in_notebook():
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 def to_pickle(obj, fn):
     with open(fn, 'wb') as f:
@@ -14,8 +27,8 @@ def read_pickle(fn):
 
 def plot_hist(h, ax=None, ylim=None, name='', train=True, valid=True, **kwargs):
     if ax is None: fig, ax = plt.subplots()
-    if train: ax.plot(h['loss'], label=f'{name}train', **kwargs)
-    if valid: ax.plot(h['val_loss'], label=f'{name}valid', **kwargs)
+    if train: ax.plot(h['loss'], label=f'{name}', **kwargs)
+    if valid: ax.plot(h['val_loss'], **kwargs)
     ax.legend()
     if ylim is not None: ax.set_ylim(ylim)
 
@@ -26,9 +39,10 @@ def plot_losses(path, exp_ids, plot_lrs=True, ylim=None, log=False):
     colors = sns.palettes.color_palette(n_colors=len(exp_ids))
     for exp_id, c, in zip(exp_ids, colors):
         fn = glob(f'{path}{exp_id}*.pkl')[0]
+        name = fn.split('/')[-1].split('_history.pkl')[0]
         h = read_pickle(fn)
-        plot_hist(h, axs[0], name=exp_id, valid=False, c=c)
-        plot_hist(h, axs[0], name=exp_id, train=False, c=c, ls='--')
+        plot_hist(h, axs[0], name=name, valid=False, c=c)
+        plot_hist(h, axs[0], name=name, train=False, c=c, ls='--')
 
 
         if plot_lrs:

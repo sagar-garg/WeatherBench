@@ -113,6 +113,35 @@ class DataGenerator(keras.utils.Sequence):
             np.random.shuffle(self.idxs)
 
 
+class CombinedDataGenerator(keras.utils.Sequence):
+    """For now assumes same length"""
+
+    def __init__(self, dgs, batch_size):
+        self.dgs = dgs
+        assert len(set([len(dg.idxs) for dg in self.dgs])) == 1, 'All dgs must have smae length'
+        self.data = self.dgs[0].data
+        self.batch_size = batch_size
+        assert batch_size % len(dgs) == 0, 'Batch size % number dgs must be zero.'
+        for dg in dgs: dg.batch_size = batch_size // len(dgs)
+
+    def __len__(self):
+        total_samples = np.sum([len(dg.idxs) for dg in self.dgs])
+        return int(np.ceil(total_samples / self.batch_size))
+
+    def __getitem__(self, i):
+        Xs = []
+        ys = []
+        for dg in self.dgs:
+            X, y = dg[i]
+            Xs.append(X)
+            ys.append(y)
+        return np.concatenate(Xs), np.concatenate(ys)
+
+    def on_epoch_end(self):
+        for dg in self.dgs:
+            dg.on_epoch_end()
+
+
 def create_predictions(model, dg):
     """Create non-iterative predictions"""
     preds = xr.DataArray(
