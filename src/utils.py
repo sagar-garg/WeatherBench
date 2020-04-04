@@ -35,14 +35,14 @@ def plot_hist(h, ax=None, ylim=None, name='', train=True, valid=True, **kwargs):
 
 def plot_losses(path, exp_ids, plot_lrs=True, ylim=None, log=False):
     exp_ids = [str(exp_id) for exp_id in exp_ids]
-    fig, axs = plt.subplots(2 if plot_lrs else 1, 1, figsize=(10, 10 if plot_lrs else 5))
+    fig, axs = plt.subplots(2 if plot_lrs else 1, 1, figsize=(15, 15 if plot_lrs else 7))
     colors = sns.palettes.color_palette(n_colors=len(exp_ids))
     for exp_id, c, in zip(exp_ids, colors):
         fn = glob(f'{path}{exp_id}*.pkl')[0]
         name = fn.split('/')[-1].split('_history.pkl')[0]
         h = read_pickle(fn)
-        plot_hist(h, axs[0], name=name, valid=False, c=c)
-        plot_hist(h, axs[0], name=name, train=False, c=c, ls='--')
+        plot_hist(h, axs[0], name=name, valid=False, c=c, lw=2)
+        plot_hist(h, axs[0], name=name, train=False, c=c, ls='--', lw=2)
 
 
         if plot_lrs:

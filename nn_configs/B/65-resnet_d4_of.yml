@@ -8,9 +8,9 @@ filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
 lead_time: 72
 lr: 0.5e-4
-early_stopping_patience: 10
-reduce_lr_patience: 5
-min_es_delta: 0.0001
+early_stopping_patience: 30
+reduce_lr_patience: 10
+#min_es_delta: 0.0001
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
