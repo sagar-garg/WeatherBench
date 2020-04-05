@@ -27,6 +27,9 @@ class LRUpdate(object):
 def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
               lead_time, batch_size, output_vars, data_subsample, norm_subsample,
               nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, **kwargs):
+    if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
+    if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
+
     # Open dataset and create data generators
     if cmip:
         # Load vars
@@ -56,16 +59,19 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
     if not only_test:
         dg_train = DataGenerator(
             ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
-            data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in
+            data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in,
+            mean=ext_mean, std=ext_std
         )
         dg_valid = DataGenerator(
-            ds_valid, var_dict, lead_time, batch_size=batch_size, mean=dg_train.mean, std=dg_train.std,
+            ds_valid, var_dict, lead_time, batch_size=batch_size,
+            mean=ext_mean if ext_mean is not None else dg_train.mean,
+            std=ext_std if ext_std is not None else dg_train.std,
             shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
         )
     dg_test = DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size,
-        mean=ext_mean if only_test else dg_train.mean,
-        std=ext_std if only_test else dg_train.std,
+        mean=ext_mean if ext_mean is not None else dg_train.mean,
+        std=ext_std if ext_std is not None else dg_train.std,
         shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
     )
     if only_test:
@@ -80,8 +86,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unet_layers, u_skip, loss,
-         cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer, min_es_delta, optimizer,
-          activation):
+         cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
+         min_es_delta, optimizer, activation, ext_mean, ext_std):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -100,23 +106,22 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 dgtr, dgv, dgte = load_data(
                     var_dict, datadir, cmip, cd, train_years, valid_years, test_years,
                     lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-                    nt_in, dt_in
+                    nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
                 CombinedDataGenerator(dg, batch_size) for dg in [dg_train, dg_valid, dg_test]]
         else:
-            cmip_dir = [cmip_dir]
             dg_train, dg_valid, dg_test = load_data(
-                var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
+                var_dict, datadir, cmip, cmip_dir[0], train_years, valid_years, test_years,
                 lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-                nt_in, dt_in
+                nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
             var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
             lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-            nt_in, dt_in
+            nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
         )
 
     # Build model
@@ -287,6 +292,8 @@ def load_args(my_config=None):
     p.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model')
     p.add_argument('--last_pretrained_layer', type=str, default=None, help='Name of last pretrained layer')
     p.add_argument('--last_trainable_layer', type=str, default=None, help='Name of last trainable layer')
+    p.add_argument('--ext_mean', type=str, default=None, help='External normalization mean')
+    p.add_argument('--ext_std', type=str, default=None, help='External normalization std')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)

@@ -1,4 +1,4 @@
-exp_id: 66-resnet_d3_cmip
+exp_id: 68-resnet_d3_cmip_NorESM
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -22,7 +22,7 @@ loss: lat_mse
 batch_size: 32
 
 cmip: 1
-cmip_dir: [/data/stephan/WeatherBench/CMIP/MPI-ESM/5.625deg/, /data/stephan/WeatherBench/CMIP/MIROC6/5.625deg/]
+cmip_dir: /data/stephan/WeatherBench/CMIP/NorESM/5.625deg/
 train_years: [1850, 1999]
 valid_years: [2000, 2008]
 test_years: [2008, 2014]

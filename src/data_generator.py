@@ -118,11 +118,15 @@ class CombinedDataGenerator(keras.utils.Sequence):
 
     def __init__(self, dgs, batch_size):
         self.dgs = dgs
-        assert len(set([len(dg.idxs) for dg in self.dgs])) == 1, 'All dgs must have smae length'
+        self.lens = np.array([len(dg.idxs) for dg in self.dgs])
         self.data = self.dgs[0].data
         self.batch_size = batch_size
-        assert batch_size % len(dgs) == 0, 'Batch size % number dgs must be zero.'
-        for dg in dgs: dg.batch_size = batch_size // len(dgs)
+        self.bss = np.round(self.lens / self.lens.sum() * batch_size)
+        missing = batch_size - self.bss.sum()
+        self.bss[0] += missing
+        assert self.bss.sum() == batch_size, 'Batch sizes dont add up'
+        print('Individual batch sizes:', self.bss)
+        for dg, bs in zip(dgs, self.bss): dg.batch_size = bs
 
     def __len__(self):
         total_samples = np.sum([len(dg.idxs) for dg in self.dgs])
