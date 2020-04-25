@@ -126,7 +126,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
         self.bss[0] += missing
         assert self.bss.sum() == batch_size, 'Batch sizes dont add up'
         print('Individual batch sizes:', self.bss)
-        for dg, bs in zip(dgs, self.bss): dg.batch_size = bs
+        for dg, bs in zip(dgs, self.bss): dg.batch_size = int(bs)
 
     def __len__(self):
         total_samples = np.sum([len(dg.idxs) for dg in self.dgs])
