@@ -64,20 +64,29 @@ def get_model(exp_id, model_save_dir):
 
 def predict(dg_test,model,number_of_forecasts, output_vars):
     #For just 1 batch of data
-    X,y=dg_test[0] #currently limiting output due to RAM issues.
+#     X,y=dg_test[0] #currently limiting output due to RAM issues.
     
-    #test-time dropout
-    func = K.function(model.inputs + [K.learning_phase()], model.outputs)
-    pred_ensemble = np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
-                              range(number_of_forecasts)])
+#     #test-time dropout
+#     func = K.function(model.inputs + [K.learning_phase()], model.outputs)
+#     pred_ensemble = np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
+#                               range(number_of_forecasts)])
     
     #For Full Data
-#     func = K.function(model.inputs + [K.learning_phase()], model.outputs)
-#     preds = []
-#     for X, y in dg_test:
-#         preds.append(np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
-#                               range(number_of_forecasts)]))
-#     pred_ensemble = np.array(preds)
+    #NOTE: Always better to append in a list, rather than as numpy array. bcoz numpy array equires contiguous memory, so if you keep appending it would be slow. alternatively, pre-allocate an empty array. Current method: append to list--> convert to numpy array-->reshape.
+    func = K.function(model.inputs + [K.learning_phase()], model.outputs)
+    preds = []
+    counter=0
+    for X, y in dg_test:
+        preds.append(np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
+                              range(number_of_forecasts)]))
+        print(counter)
+        counter=counter+1
+    pred_ensemble = np.array(preds)
+    
+    #reshaping. Double CHECK!
+    shp=pred_ensemble.shape
+    pred_ensemble=pred_ensemble.transpose(1,0,2,3,4,5).reshape(shp[1],-1,shp[-3],shp[-2],shp[-1])
+    print(pred_ensemble.shape)
     
     #unnormalize
     #observation=y
