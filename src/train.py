@@ -127,7 +127,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     # Build model
     if pretrained_model is not None:
         pretrained_model = keras.models.load_model(
-            pretrained_model, custom_objects={'PeriodicConv2D': PeriodicConv2D})
+            pretrained_model, custom_objects={'PeriodicConv2D': PeriodicConv2D, 'lat_mse': keras.losses.mse}
+        )
 
     with mirrored_strategy.scope():
         if network_type == 'resnet':
@@ -215,7 +216,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     # Print score in real units
     # TODO: Make flexible for other states
 
-    if cmip: datadir = cmip_dir
+    if cmip:
+        return
     if '5.625deg' in datadir:
         valdir = datadir
     else:

@@ -1,4 +1,4 @@
-exp_id: 68-resnet_d3_cmip_NorESM
+exp_id: 82-resnet_d3_dr_0.2
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -14,15 +14,9 @@ min_es_delta: 0.0001
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
-dropout: 0.1
+dropout: 0.2
 l2: 1e-5
 activation: leakyrelu
 nt: 3
 loss: lat_mse
 batch_size: 32
-
-cmip: 1
-cmip_dir: /data/stephan/WeatherBench/CMIP/NorESM/5.625deg/
-train_years: [1850, 1999]
-valid_years: [2000, 2008]
-test_years: [2008, 2014]
