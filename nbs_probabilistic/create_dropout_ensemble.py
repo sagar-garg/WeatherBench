@@ -25,6 +25,7 @@ def get_input(args, exp_id_path, datadir, model_save_dir):
     data_subsample=args['data_subsample']
     norm_subsample=args['norm_subsample']
     nt_in=args['nt_in'] #Ques: sometimes mentioned in config file as 'nt'. is that same?
+    #nt_in=args['nt']
     dt_in=args['dt_in']
     test_years=args['test_years']
     lead_time=args['lead_time']
@@ -64,29 +65,44 @@ def get_model(exp_id, model_save_dir):
 
 def predict(dg_test,model,number_of_forecasts, output_vars):
     #For just 1 batch of data
-#     X,y=dg_test[0] #currently limiting output due to RAM issues.
-    
+#     X,y=dg_test[0] #currently limiting output due to RAM issues.  
 #     #test-time dropout
 #     func = K.function(model.inputs + [K.learning_phase()], model.outputs)
 #     pred_ensemble = np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
 #                               range(number_of_forecasts)])
     
-    #For Full Data
-    #NOTE: Always better to append in a list, rather than as numpy array. bcoz numpy array equires contiguous memory, so if you keep appending it would be slow. alternatively, pre-allocate an empty array. Current method: append to list--> convert to numpy array-->reshape.
+    #For Full Data. @Stephan: Please check.
+    #Issue: The last batch is shorter (18 elements instead of 32). so list has differing sizes. 
+    #so unable to convert to np.array(preds). error: can't broadcast from shape (1,32,32,64,2)   to (2)
+    #so using an if conditon to break.
+    
+    #NOTE: Always better to append in a list, rather than as numpy array. bcoz numpy array equires contiguous memory (not exactly, but yeah), so if you keep appending it would be slow. alternatively, pre-allocate an empty numpy array. Current method: append to list--> convert to numpy array-->reshape.
     func = K.function(model.inputs + [K.learning_phase()], model.outputs)
     preds = []
     counter=0
-    for X, y in dg_test:
-        preds.append(np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() for _ in
-                              range(number_of_forecasts)]))
-        print(counter)
+    for X, y in dg_test: 
+        preds.append(np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() 
+                               for _ in range(number_of_forecasts)]))
+
+        if (counter%10==0):
+                print(counter)
+        if counter==len(dg_test)-2:
+            print(counter)
+            break
         counter=counter+1
-    pred_ensemble = np.array(preds)
-    
-    #reshaping. Double CHECK!
+
+    pred_ensemble=np.array(preds)
+    #reshaping. Be careful!
     shp=pred_ensemble.shape
     pred_ensemble=pred_ensemble.transpose(1,0,2,3,4,5).reshape(shp[1],-1,shp[-3],shp[-2],shp[-1])
-    print(pred_ensemble.shape)
+    pred_ensemble.shape
+
+    #for last batch (Bad method)
+    last_element=len(dg_test)-1
+    X,y=dg_test[last_element]
+    pred_last=np.array([np.asarray(func([X] + [1.]), dtype=np.float32).squeeze() 
+                                for _ in range(number_of_forecasts)])
+    pred_ensemble=np.append(pred_ensemble,pred_last,axis=1)
     
     #unnormalize
     #observation=y
@@ -99,7 +115,7 @@ def predict(dg_test,model,number_of_forecasts, output_vars):
     preds = xr.Dataset()
     i=0
     for var in output_vars:
-        da= xr.DataArray(pred_ensemble[...,i], coords={'member': np.arange(number_of_forecasts),'time': dg_test.data.time.isel(time=slice(None,X.shape[0])), 'lat': dg_test.data.lat, 'lon': dg_test.data.lon,}, dims=['member', 'time','lat', 'lon'])
+        da= xr.DataArray(pred_ensemble[...,i], coords={'member': np.arange(number_of_forecasts),'time': dg_test.data.time.isel(time=slice(None,pred_ensemble.shape[1])), 'lat': dg_test.data.lat, 'lon': dg_test.data.lon,}, dims=['member', 'time','lat', 'lon'])
         
         preds[var]=da
         i=i+1
@@ -111,6 +127,8 @@ def main(number_of_forecasts, exp_id_path, datadir, model_save_dir, pred_save_di
     exp_id=args['exp_id']
     output_vars=args['output_vars']
     
+    os.environ["CUDA_VISIBLE_DEVICES"]=str(0)
+    limit_mem()
     dg_test=get_input(args, exp_id_path, datadir, model_save_dir)
     mymodel=get_model(exp_id, model_save_dir)
     preds=predict(dg_test,mymodel,number_of_forecasts, output_vars)
