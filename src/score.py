@@ -46,12 +46,12 @@ def compute_weighted_rmse(da_fc, da_true, mean_dims=xr.ALL_DIMS):
         rmse.name = error.name + '_rmse' if not error.name is None else 'rmse'
     return rmse
 
-def evaluate_iterative_forecast(fc_iter, da_valid):
+def evaluate_iterative_forecast(fc_iter, da_valid, mean_dims=xr.ALL_DIMS):
     rmses = []
     for lead_time in fc_iter.lead_time:
         fc = fc_iter.sel(lead_time=lead_time)
         fc['time'] = fc.time + np.timedelta64(int(lead_time), 'h')
-        rmses.append(compute_weighted_rmse(fc, da_valid))
+        rmses.append(compute_weighted_rmse(fc, da_valid, mean_dims))
     return xr.concat(rmses, 'lead_time')
     # return xr.DataArray(rmses, dims=['lead_time'], coords={'lead_time': fc_iter.lead_time})
 
