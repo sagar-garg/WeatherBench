@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 import tensorflow as tf
 import tensorflow.keras as keras
+from tensorflow.keras.mixed_precision import experimental as mixed_precision
 from configargparse import ArgParser
 
 
@@ -97,6 +98,10 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     mirrored_strategy = tf.distribute.MirroredStrategy(
         devices=[f"/gpu:{i}" for i, g in enumerate(gpu)]
     )
+
+    # Mixed precicion policy
+    policy = mixed_precision.Policy('mixed_float16')
+    mixed_precision.set_policy(policy)
 
     # Open dataset and create data generators
     if cmip:

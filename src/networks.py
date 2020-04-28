@@ -119,7 +119,10 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
 
     # Final convolution
     output = PeriodicConv2D(
-        filters[-1], kernels[-1], conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
+        filters[-1], kernels[-1],
+        conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
+    )(x)
+    output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 
 
