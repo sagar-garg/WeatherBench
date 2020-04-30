@@ -91,16 +91,70 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
     return x
 
 def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
-             dropout=0, skip=True, activation='relu'):
+             dropout=0, skip=True, activation='relu', down=False, up=False):
     x = inputs
-    for _ in range(2):
+    if down:
+        x = MaxPooling2D()(x)
+    for i in range(2):
         x = convblock(
             x, filters, kernel, bn_position=bn_position, l2=l2, use_bias=use_bias,
             dropout=dropout, activation=activation
         )
+    if down or up:
+        inputs = PeriodicConv2D(
+            filters, kernel, conv_kwargs={
+                'kernel_regularizer': regularizers.l2(l2),
+                'use_bias': use_bias,
+                'strides': 2 if down else 1
+            }
+        )(inputs)
     if skip: x = Add()([inputs, x])
     return x
 
+
+def build_uresnet(filters, kernels, nres, input_shape, bn_position=None, use_bias=True, l2=0,
+                  skip=True, dropout=0, activation='relu'):
+    """
+    filters
+    0: init Conv2D
+    1: first and last resblock
+    [2:-1]: all down layers
+    -1: last conv2d
+    """
+
+    x = input = Input(shape=input_shape)
+
+    # First conv block to get up to shape
+    x = convblock(
+        x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
+        dropout=dropout, activation=activation
+    )
+
+    # Resblocks
+    for _ in range(nres):
+        x = resblock(x, filters[1], kernels[1], bn_position=bn_position, l2=l2, use_bias=use_bias,
+                     dropout=dropout, skip=skip, activation=activation)
+
+    connections = []
+    for f, k in zip(filters[2:-1], kernels[2:-1]):
+        connections.append(x)
+        for i in range(nres):
+            x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                         dropout=dropout, skip=skip, activation=activation, down=i == 0)
+    for c, f, k in zip(connections[::-1], filters[1:-2][::-1], kernels[1:-2][::-1]):
+        x = UpSampling2D()(x)
+        x = Concatenate()([c, x])
+        for i in range(nres):
+            x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                         dropout=dropout, skip=skip, activation=activation, up=i == 0)
+
+    # Final convolution
+    output = PeriodicConv2D(
+        filters[-1], kernels[-1],
+        conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
+    )(x)
+    output = Activation('linear', dtype='float32')(output)
+    return keras.models.Model(input, output)
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
                  skip=True, dropout=0, activation='relu'):

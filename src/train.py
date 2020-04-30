@@ -86,7 +86,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
-         reduce_lr_patience, reduce_lr_factor, min_lr_times, unet_layers, u_skip, loss,
+         reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
          min_es_delta, optimizer, activation, ext_mean, ext_std):
     print(type(var_dict))
@@ -144,13 +144,14 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
                 dropout=dropout, activation=activation
             )
-        elif network_type == 'unet_google':
-            model = build_unet_google(
-                filters,
-                input_shape=(len(dg_train.data.lat), len(dg_train.data.lon),len(dg_train.data.level) * nt_in),
-                output_channels=len(dg_train.output_idxs),
-                dropout=dropout
-                )
+        elif network_type == 'uresnet':
+            model = build_uresnet(
+                filters, kernels, unres, input_shape=(
+            len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
+        ),
+                bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
+                dropout=dropout, activation=activation
+            )
 
         if pretrained_model is not None:
             # Copy over weights
@@ -292,8 +293,9 @@ def load_args(my_config=None):
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
     p.add_argument('--dropout', type=float, default=0, help='Dropout')
     p.add_argument('--skip', type=int, default=1, help='Add skip convs in resnet builder')
-    p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')
-    p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
+    # p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')
+    # p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
+    p.add_argument('--unres', type=int, default=2, help='Resblocks per unet partition')
     p.add_argument('--cmip', type=int, default=0, help='Is CMIP')
     p.add_argument('--cmip_dir', type=str, default=None, nargs='+', help='Dirs for CMIP data')
     p.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model')
