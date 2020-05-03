@@ -101,6 +101,10 @@ def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     return mean_spread
 
 def crps_score(da_fc,da_true,member_axis,mean_dims=xr.ALL_DIMS): 
+    #check size
+    da_true=da_true.sel(time=da_fc.time)
+    assert (da_true.time==da_fc.time).all
+    
     #import properscoring as ps
     obs = np.asarray(da_true.to_array(), dtype=np.float32).squeeze();
     #shape: (variable,time, lat, lon)
