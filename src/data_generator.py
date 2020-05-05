@@ -8,7 +8,7 @@ import pdb
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
-                 nt_in=1, dt_in=1):
+                 nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -35,6 +35,9 @@ class DataGenerator(keras.utils.Sequence):
         self.nt_in = nt_in
         self.dt_in = dt_in
         self.nt_offset = (nt_in - 1) * dt_in
+        self.cont_time = cont_time
+        self.fixed_time = fixed_time
+        self.multi_dt = multi_dt
 
         data = []
         level_names = []
@@ -63,12 +66,13 @@ class DataGenerator(keras.utils.Sequence):
         else:
             self.output_idxs = [i for i, l in enumerate(self.data.level_names.values)
                                 if any([bool(re.match(o, l)) for o in output_vars])]
+        self.const_idxs = [i for i, l in enumerate(self.data.level_names) if l in var_dict['constants']]
+        self.not_const_idxs = [i for i, l in enumerate(self.data.level_names) if l not in var_dict['constants']]
 
         # Subsample
         self.data = self.data.isel(time=slice(0, None, data_subsample))
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
-        assert (self.lead_time / self.dt).is_integer(), "lead_time and dt not compatible."
-        self.nt = int(self.lead_time / self.dt)
+
 
         # Normalize
         print('DG normalize', datetime.datetime.now().time())
@@ -78,10 +82,6 @@ class DataGenerator(keras.utils.Sequence):
         self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
             ('time', 'lat', 'lon')).compute() if std is None else std
         self.data = (self.data - self.mean) / self.std
-
-        self.n_samples = self.data.isel(time=slice(0, -self.nt)).shape[0]
-        self.init_time = self.data.isel(time=slice(self.nt_offset, -self.nt)).time
-        self.valid_time = self.data.isel(time=slice(self.nt+self.nt_offset, None)).time
 
         self.on_epoch_end()
 
@@ -93,18 +93,59 @@ class DataGenerator(keras.utils.Sequence):
     def __len__(self):
         'Denotes the number of batches per epoch'
         return int(np.ceil(len(self.idxs) / self.batch_size))
+    
+    @property
+    def shape(self):
+        return len(self.data.lat), len(self.data.lon), len(self.data.level) * self.nt_in + self.cont_time
+
+    @property
+    def nt(self):
+        assert (self.lead_time / self.dt).is_integer(), "lead_time and dt not compatible."
+        return int(self.lead_time / self.dt)
+
+    @property
+    def init_time(self):
+        return self.data.isel(time=slice(self.nt_offset, -self.nt)).time
+
+    @property
+    def valid_time(self):
+        return self.data.isel(time=slice(self.nt+self.nt_offset, None)).time
+
+    @property
+    def n_samples(self):
+        return self.data.isel(time=slice(0, -self.nt)).shape[0]
 
     def __getitem__(self, i):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
-        X = self.data.isel(time=idxs).values
+        if self.cont_time:
+            if not self.fixed_time:
+                nt = np.random.randint(1, self.nt, len(idxs))
+            else:
+                nt = np.ones(len(idxs), dtype='int') * self.nt
+            ftime = (nt * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat),
+                                                                      len(self.data.lon)))
+        else:
+            nt = self.nt
+        X = self.data.isel(time=idxs).values.astype('float32')
+        if self.multi_dt > 1: consts = X[..., self.const_idxs]
         if self.nt_in > 1:
             X = np.concatenate([
                 self.data.isel(time=idxs-nt_in*self.dt_in).values
                                    for nt_in in range(self.nt_in-1, 0, -1)
-            ] + [X], axis=-1)
-        y = self.data.isel(time=idxs + self.nt, level=self.output_idxs).values
-        return X.astype('float32'), y.astype('float32')
+            ] + [X], axis=-1).astype('float32')
+        if self.multi_dt > 1:
+            X = [X[..., self.not_const_idxs], consts]
+            step = self.nt // self.multi_dt
+            y = [
+                self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
+                for nt in np.arange(step, self.nt+step, step)
+            ]
+        else:
+            y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
+        if self.cont_time: 
+            X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
+        return X, y
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
@@ -114,7 +155,6 @@ class DataGenerator(keras.utils.Sequence):
 
 
 class CombinedDataGenerator(keras.utils.Sequence):
-    """For now assumes same length"""
 
     def __init__(self, dgs, batch_size):
         self.dgs = dgs
@@ -146,10 +186,10 @@ class CombinedDataGenerator(keras.utils.Sequence):
             dg.on_epoch_end()
 
 
-def create_predictions(model, dg):
+def create_predictions(model, dg, multi_dt=False):
     """Create non-iterative predictions"""
     preds = xr.DataArray(
-        model.predict(dg),
+        model.predict(dg)[0] if multi_dt else model.predict(dg),
         dims=['time', 'lat', 'lon', 'level'],
         coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
                 'level': dg.data.isel(level=dg.output_idxs).level,
