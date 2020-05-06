@@ -44,6 +44,25 @@ def compute_weighted_rmse(da_fc, da_true, mean_dims=xr.ALL_DIMS):
         rmse.name = error.name + '_rmse' if not error.name is None else 'rmse'
     return rmse
 
+def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
+    """
+    Compute the MAE with latitude weighting from two xr.DataArrays.
+    Args:
+        da_fc (xr.DataArray): Forecast. Time coordinate must be validation time.
+        da_true (xr.DataArray): Truth.
+    Returns:
+        mae: Latitude weighted root mean squared error
+    """
+    error = da_fc - da_true
+    weights_lat = np.cos(np.deg2rad(error.lat))
+    weights_lat /= weights_lat.mean()
+    mae = (np.abs(error) * weights_lat).mean(mean_dims)
+    if type(mae) is xr.Dataset:
+        mae = mae.rename({v: v + '_mae' for v in mae})
+    else: # DataArray
+        mae.name = error.name + '_mae' if not error.name is None else 'mae'
+    return mae
+
 def evaluate_iterative_forecast(fc_iter, da_valid):
     rmses = []
     for lead_time in fc_iter.lead_time:
@@ -99,6 +118,7 @@ def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     else: # DataArray
         mean_spread.name = error.name + '_mean_spread' if not error.name is None else 'mean_spread'
     return mean_spread
+
 
 def crps_score(da_fc,da_true,member_axis,mean_dims=xr.ALL_DIMS): 
     #check size
