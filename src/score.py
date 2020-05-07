@@ -3,7 +3,8 @@ Functions for evaluating forecasts.
 """
 import numpy as np
 import xarray as xr
-import properscoring as ps
+#import properscoring as ps
+import xskillscore as xs
 
 def load_test_data(path, var, years=slice('2017', '2018'), cmip=False):
     """
@@ -120,46 +121,55 @@ def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     return mean_spread
 
 
-def crps_score(da_fc,da_true,member_axis,mean_dims=xr.ALL_DIMS): 
-    #check size
+def compute_weighted_crps(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     da_true=da_true.sel(time=da_fc.time)
-    assert (da_true.time==da_fc.time).all
+    assert (da_true.time==da_fc.time).all #checking size.
     
-    #import properscoring as ps
-    obs = np.asarray(da_true.to_array(), dtype=np.float32).squeeze();
-    #shape: (variable,time, lat, lon)
-    pred=np.asarray(da_fc.to_array(), dtype=np.float32).squeeze();
-    #shape: (variable, member, time, lat, lon)
-    member_axis=member_axis+1 #Weird but have to do since the above line changes position of member_axis
-    if pred.ndim==4: #for single ensemble member. #ToDo: make it general
-        pred=np.expand_dims(pred,axis=member_axis)
-    
-    crps=ps.crps_ensemble(obs,pred, weights=None, issorted=False,axis=member_axis) 
-    #crps.shape  #(variable, time, lat, lon)
-#     if crps.ndim==3: #for single input.#ToDo: make it general
-#         crps=np.expand_dims(crps,axis=member_axis)
-   #Converting back to xarray
-    crps_score = xr.Dataset({
-        'z500': xr.DataArray(
-        crps[0,...],
-        dims=['time', 'lat', 'lon'],
-        coords={'time': da_true.time, 'lat': da_true.lat, 'lon': da_true.lon,
-                },
-        ),
-        't850': xr.DataArray(
-        crps[1,...],
-        dims=['time', 'lat', 'lon'],
-        coords={'time': da_true.time, 'lat': da_true.lat, 'lon': da_true.lon,
-                },
-        )
-    })
-    
-    #averaging to get single valye
-    weights_lat = np.cos(np.deg2rad(crps_score.lat))
+    weights_lat = np.cos(np.deg2rad(da_fc.lat))
     weights_lat /= weights_lat.mean()
-    crps_score = (crps_score* weights_lat).mean(mean_dims)
+    crps = xs.crps_ensemble(da_true, da_fc)
+    crps = (crps * weights_lat).mean(mean_dims)
+    return crps
+# def crps_score(da_fc,da_true,member_axis,mean_dims=xr.ALL_DIMS): 
+#     #check size
+#     da_true=da_true.sel(time=da_fc.time)
+#     assert (da_true.time==da_fc.time).all
     
-    return crps_score 
+#     #import properscoring as ps
+#     obs = np.asarray(da_true.to_array(), dtype=np.float32).squeeze();
+#     #shape: (variable,time, lat, lon)
+#     pred=np.asarray(da_fc.to_array(), dtype=np.float32).squeeze();
+#     #shape: (variable, member, time, lat, lon)
+#     member_axis=member_axis+1 #Weird but have to do since the above line changes position of member_axis
+#     if pred.ndim==4: #for single ensemble member. #ToDo: make it general
+#         pred=np.expand_dims(pred,axis=member_axis)
+    
+#     crps=ps.crps_ensemble(obs,pred, weights=None, issorted=False,axis=member_axis) 
+#     #crps.shape  #(variable, time, lat, lon)
+# #     if crps.ndim==3: #for single input.#ToDo: make it general
+# #         crps=np.expand_dims(crps,axis=member_axis)
+#    #Converting back to xarray
+#     crps_score = xr.Dataset({
+#         'z500': xr.DataArray(
+#         crps[0,...],
+#         dims=['time', 'lat', 'lon'],
+#         coords={'time': da_true.time, 'lat': da_true.lat, 'lon': da_true.lon,
+#                 },
+#         ),
+#         't850': xr.DataArray(
+#         crps[1,...],
+#         dims=['time', 'lat', 'lon'],
+#         coords={'time': da_true.time, 'lat': da_true.lat, 'lon': da_true.lon,
+#                 },
+#         )
+#     })
+    
+#     #averaging to get single valye
+#     weights_lat = np.cos(np.deg2rad(crps_score.lat))
+#     weights_lat /= weights_lat.mean()
+#     crps_score = (crps_score* weights_lat).mean(mean_dims)
+    
+#     return crps_score 
 
 def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     """

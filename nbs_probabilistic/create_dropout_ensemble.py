@@ -91,7 +91,7 @@ def predict(dg_test,model,ensemble_size, output_vars):
     for i,var in enumerate(output_vars):
         da= xr.DataArray(pred_ensemble[...,i], 
                          coords={'member': np.arange(ensemble_size),
-                                 'time': dg_test.data.time.sel(time=dg_test.valid_time),
+                                 'time': dg_test.valid_time,
                                  'lat': dg_test.data.lat, 'lon': dg_test.data.lon,}, 
                          dims=['member', 'time','lat', 'lon'])
         preds[var]=da
