@@ -50,3 +50,50 @@ def plot_losses(path, exp_ids, plot_lrs=True, ylim=None, log=False):
 
     axs[0].set_ylim(ylim)
     if log: axs[0].set_yscale('log')
+
+
+def plot_rmses(rmse, var, save_fn=None, ax=None, legend=False):
+    # Color settings
+    c_lri = '#ff7f00'
+    c_lrd = '#ff7f00'
+    c_cnni = '#e41a1c'
+    c_cnnd = '#e41a1c'
+    c_tigge = '#984ea3'
+    c_t42 = '#4daf4a'
+    c_t63 = '#377eb8'
+    c_persistence = '0.2'
+    c_climatology = '0.5'
+    c_weekly_climatology = '0.7'
+
+    if ax is None: fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+    rmse[var + '_persistence'].plot(c=c_persistence, label='Persistence', lw=3, ax=ax)
+    ax.axhline(rmse[var + '_climatology'], ls='--', c=c_climatology, label='Climatology', lw=3)
+    ax.axhline(rmse[var + '_weekly_climatology'], ls='--', c=c_weekly_climatology, label='Weekly clim.', lw=3)
+    rmse[var + '_t42'].plot(c=c_t42, label='IFS T42', lw=3, ax=ax)
+    rmse[var + '_t63'][::2].plot(c=c_t63, label='IFS T63', lw=3, ax=ax)
+    rmse[var + '_tigge'].plot(c=c_tigge, label='Operational', lw=3, ax=ax)
+    #     rmse[var+'_lr_6h_iter'].plot(c=c_lri, label='LR (iterative)', lw=3, ax=ax)
+    #     ax.scatter([3*24], [rmse[var+'_lr_3d']], c=c_lrd, s=100, label='LR (direct)', lw=2, edgecolors='k', zorder=10)
+    #     ax.scatter([5*24], [rmse[var+'_lr_5d']], c=c_lrd, s=100, lw=2, edgecolors='k', zorder=10)
+    #     rmse[var+'_cnn_6h_iter'].plot(c=c_cnni, label='CNN (iterative)', lw=3, ax=ax)
+    #     ax.scatter([3*24], [rmse[var+'_cnn_3d']], c=c_cnnd, s=100, label='CNN (direct)', lw=2, edgecolors='k', zorder=10)
+    #     ax.scatter([5*24], [rmse[var+'_cnn_5d']], c=c_cnnd, s=100, lw=2, edgecolors='k', zorder=10)
+
+    if var == 'z':
+        ax.set_ylim(0, 1200)
+        ax.set_ylabel(r'Z500 RMSE [m$^2$ s$^{-2}$]')
+        ax.set_title('a) Z500')
+    elif var == 't':
+        ax.set_ylim(0, 6)
+        ax.set_ylabel(r'T850 RMSE [K]')
+        ax.set_title('b) T850')
+
+    if legend: ax.legend(loc=2, framealpha=1)
+    ax.set_xlim(0, 122)
+    ax.set_xticks(range(0, 121, 24))
+    ax.set_xticklabels(range(6))
+    ax.set_xlabel('Forecast time [days]')
+
+    if not save_fn is None:
+        plt.subplots_adjust(left=0.15, right=0.95, top=0.9, bottom=0.1)
+        fig.savefig(save_fn)

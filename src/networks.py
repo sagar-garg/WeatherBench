@@ -89,20 +89,77 @@ def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
     return x
 
 def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
-             dropout=0, skip=True, activation='relu'):
+             dropout=0, skip=True, activation='relu', down=False, up=False):
     x = inputs
-    for _ in range(2):
+    if down:
+        x = MaxPooling2D()(x)
+    for i in range(2):
         x = convblock(
             x, filters, kernel, bn_position=bn_position, l2=l2, use_bias=use_bias,
             dropout=dropout, activation=activation
         )
+    if down or up:
+        inputs = PeriodicConv2D(
+            filters, kernel, conv_kwargs={
+                'kernel_regularizer': regularizers.l2(l2),
+                'use_bias': use_bias,
+                'strides': 2 if down else 1
+            }
+        )(inputs)
     if skip: x = Add()([inputs, x])
     return x
 
 
+def build_uresnet(filters, kernels, unres, input_shape, bn_position=None, use_bias=True, l2=0,
+                  skip=True, dropout=0, activation='relu', **kwargs):
+    """
+    filters
+    0: init Conv2D
+    1: first and last resblock
+    [2:-1]: all down layers
+    -1: last conv2d
+
+    nres has to have len(filters) - 2
+    """
+    if len(unres) == 1: nres = [unres]*(len(filters)-2)
+
+    x = input = Input(shape=input_shape)
+
+    # First conv block to get up to shape
+    x = convblock(
+        x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
+        dropout=dropout, activation=activation
+    )
+
+    # Resblocks
+    for _ in range(unres[0]):
+        x = resblock(x, filters[1], kernels[1], bn_position=bn_position, l2=l2, use_bias=use_bias,
+                     dropout=dropout, skip=skip, activation=activation)
+
+    connections = []
+    for f, k, nr in zip(filters[2:-1], kernels[2:-1], unres[1:]):
+        connections.append(x)
+        for i in range(nr):
+            x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                         dropout=dropout, skip=skip, activation=activation, down=i == 0)
+    for c, f, k, nr in zip(connections[::-1], filters[1:-2][::-1], kernels[1:-2][::-1], unres[:-1][::-1]):
+        x = UpSampling2D()(x)
+        x = Concatenate()([c, x])
+        for i in range(nr):
+            x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                         dropout=dropout, skip=skip, activation=activation, up=i == 0)
+
+    # Final convolution
+    output = PeriodicConv2D(
+        filters[-1], kernels[-1],
+        conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
+    )(x)
+    output = Activation('linear', dtype='float32')(output)
+    return keras.models.Model(input, output)
+
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
-                 skip=True, dropout=0, activation='relu'):
+                 skip=True, dropout=0, activation='relu', **kwargs):
     x = input = Input(shape=input_shape)
 
     # First conv block to get up to shape
@@ -118,7 +175,10 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
 
     # Final convolution
     output = PeriodicConv2D(
-        filters[-1], kernels[-1], conv_kwargs={'kernel_regularizer': regularizers.l2(l2)})(x)
+        filters[-1], kernels[-1],
+        conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
+    )(x)
+    output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 
 
@@ -175,9 +235,18 @@ def create_lat_mse(lat):
     weights_lat /= weights_lat.mean()
     def lat_mse(y_true, y_pred):
         error = y_true - y_pred
-        mse = (error)**2 * weights_lat[None, : , None, None]
+        mse = error**2 * weights_lat[None, : , None, None]
         return mse
     return lat_mse
+
+def create_lat_rmse(lat):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def lat_rmse(y_true, y_pred):
+        error = y_true - y_pred
+        mse = error**2 * weights_lat[None, : , None, None]
+        return tf.math.sqrt(tf.math.reduce_mean(mse, axis=(1, 2, 3)))
+    return lat_rmse
 
 
 # Agrawal et al version
@@ -245,3 +314,15 @@ def build_unet_google(filters, input_shape, output_channels, dropout=0):
     outputs = PeriodicConv2D(output_channels, kernel_size=1)(x)
 
     return keras.models.Model(inputs, outputs)
+
+
+###
+def create_multi_dt_model(model, multi_dt, dg_train):
+    const_inp = Input((len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.const_idxs)))
+    x = inp = Input((len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.not_const_idxs)))
+    outputs = []
+    for _ in range(multi_dt):
+        x = model(Concatenate()([x, const_inp]))
+        outputs.append(x)
+    model2 = keras.models.Model([inp, const_inp], outputs)
+    return model2

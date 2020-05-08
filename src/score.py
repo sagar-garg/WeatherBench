@@ -45,31 +45,15 @@ def compute_weighted_rmse(da_fc, da_true, mean_dims=xr.ALL_DIMS):
         rmse.name = error.name + '_rmse' if not error.name is None else 'rmse'
     return rmse
 
-def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
-    """
-    Compute the MAE with latitude weighting from two xr.DataArrays.
-    Args:
-        da_fc (xr.DataArray): Forecast. Time coordinate must be validation time.
-        da_true (xr.DataArray): Truth.
-    Returns:
-        mae: Latitude weighted root mean squared error
-    """
-    error = da_fc - da_true
-    weights_lat = np.cos(np.deg2rad(error.lat))
-    weights_lat /= weights_lat.mean()
-    mae = (np.abs(error) * weights_lat).mean(mean_dims)
-    if type(mae) is xr.Dataset:
-        mae = mae.rename({v: v + '_mae' for v in mae})
-    else: # DataArray
-        mae.name = error.name + '_mae' if not error.name is None else 'mae'
-    return mae
 
-def evaluate_iterative_forecast(fc_iter, da_valid):
+
+
+def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
     rmses = []
-    for lead_time in fc_iter.lead_time:
-        fc = fc_iter.sel(lead_time=lead_time)
-        fc['time'] = fc.time + np.timedelta64(int(lead_time), 'h')
-        rmses.append(compute_weighted_rmse(fc, da_valid))
+    for f in da_fc.lead_time:
+        fc = da_fc.sel(lead_time=f)
+        fc['time'] = fc.time + np.timedelta64(int(f), 'h')
+        rmses.append(func(fc, da_valid, mean_dims))
     return xr.concat(rmses, 'lead_time')
     # return xr.DataArray(rmses, dims=['lead_time'], coords={'lead_time': fc_iter.lead_time})
 
@@ -169,22 +153,21 @@ def compute_weighted_crps(da_fc, da_true, mean_dims=xr.ALL_DIMS):
 #     weights_lat /= weights_lat.mean()
 #     crps_score = (crps_score* weights_lat).mean(mean_dims)
     
-#     return crps_score 
+#     return crps_score
 
 def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     """
-    Compute the Mean Absolute Error with latitude weighting from two xr.DataArrays.
+    Compute the MAE with latitude weighting from two xr.DataArrays.
     Args:
         da_fc (xr.DataArray): Forecast. Time coordinate must be validation time.
         da_true (xr.DataArray): Truth.
     Returns:
-        mae: Latitude weighted root mean absolute error
+        mae: Latitude weighted root mean squared error
     """
     error = da_fc - da_true
     weights_lat = np.cos(np.deg2rad(error.lat))
     weights_lat /= weights_lat.mean()
-    mae = (np.absolute(error) * weights_lat).mean(mean_dims)
-    #mae=np.absolute(error).mean(mean_dims)
+    mae = (np.abs(error) * weights_lat).mean(mean_dims)
     if type(mae) is xr.Dataset:
         mae = mae.rename({v: v + '_mae' for v in mae})
     else: # DataArray

@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 import tensorflow as tf
 import tensorflow.keras as keras
+from tensorflow.keras.mixed_precision import experimental as mixed_precision
 from configargparse import ArgParser
 
 
@@ -26,7 +27,8 @@ class LRUpdate(object):
 
 def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
               lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-              nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, **kwargs):
+              nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, cont_time=False,
+              multi_dt=1, verbose=0, **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
 
@@ -38,8 +40,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         ds = xr.merge(
             [xr.open_mfdataset(f'{cmip_dir}/{var}/*.nc', combine='by_coords')
              for var in tmp_dict.keys()] +
-            [xr.open_mfdataset(f'{datadir}/constants/*.nc', combine='by_coords')]
-            ,
+            [xr.open_mfdataset(f'{datadir}/constants/*.nc', combine='by_coords')],
             fill_value=0  # For the 'tisr' NaNs
         )
         # pdb.set_trace()
@@ -60,24 +61,28 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         dg_train = DataGenerator(
             ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
             data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in,
-            mean=ext_mean, std=ext_std
+            mean=ext_mean, std=ext_std, cont_time=cont_time, multi_dt=multi_dt
         )
         dg_valid = DataGenerator(
             ds_valid, var_dict, lead_time, batch_size=batch_size,
+            data_subsample=data_subsample,
             mean=ext_mean if ext_mean is not None else dg_train.mean,
             std=ext_std if ext_std is not None else dg_train.std,
-            shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
+            shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
+            cont_time=cont_time, multi_dt=multi_dt
         )
     dg_test = DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size,
+        data_subsample=data_subsample,
         mean=ext_mean if ext_mean is not None else dg_train.mean,
         std=ext_std if ext_std is not None else dg_train.std,
-        shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in
+        shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
+        cont_time=cont_time, multi_dt=multi_dt
     )
     if only_test:
         return dg_test
     else:
-        print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
+        if verbose: print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
         return dg_train, dg_valid, dg_test
 
 
@@ -85,9 +90,9 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          model_save_dir, pred_save_dir, train_years, valid_years, test_years, lead_time, gpu,
          norm_subsample, data_subsample, lr_step, lr_divide, network_type, restore_best_weights,
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
-         reduce_lr_patience, reduce_lr_factor, min_lr_times, unet_layers, u_skip, loss,
+         reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
-         min_es_delta, optimizer, activation, ext_mean, ext_std):
+         min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -98,6 +103,10 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
         devices=[f"/gpu:{i}" for i, g in enumerate(gpu)]
     )
 
+    # Mixed precicion policy
+    policy = mixed_precision.Policy('mixed_float16')
+    mixed_precision.set_policy(policy)
+
     # Open dataset and create data generators
     if cmip:
         if len(cmip_dir) > 1:
@@ -106,7 +115,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 dgtr, dgv, dgte = load_data(
                     var_dict, datadir, cmip, cd, train_years, valid_years, test_years,
                     lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-                    nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
+                    nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
+                    multi_dt=multi_dt
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -115,13 +125,15 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             dg_train, dg_valid, dg_test = load_data(
                 var_dict, datadir, cmip, cmip_dir[0], train_years, valid_years, test_years,
                 lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-                nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
+                nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
+                multi_dt=multi_dt
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
             var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
             lead_time, batch_size, output_vars, data_subsample, norm_subsample,
-            nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std
+            nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
+            multi_dt=multi_dt
         )
 
     # Build model
@@ -133,19 +145,19 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     with mirrored_strategy.scope():
         if network_type == 'resnet':
             model = build_resnet(
-                filters, kernels, input_shape=(
-            len(dg_train.data.lat), len(dg_train.data.lon), len(dg_train.data.level) * nt_in
-        ),
+                filters, kernels, input_shape=dg_train.shape,
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
                 dropout=dropout, activation=activation
             )
-        elif network_type == 'unet_google':
-            model = build_unet_google(
-                filters,
-                input_shape=(len(dg_train.data.lat), len(dg_train.data.lon),len(dg_train.data.level) * nt_in),
-                output_channels=len(dg_train.output_idxs),
-                dropout=dropout
-                )
+        elif network_type == 'uresnet':
+            model = build_uresnet(
+                filters, kernels, unres, input_shape=dg_train.shape,
+                bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
+                dropout=dropout, activation=activation
+            )
+
+        if multi_dt > 1:
+            model = create_multi_dt_model(model, multi_dt, dg_train)
 
         if pretrained_model is not None:
             # Copy over weights
@@ -161,10 +173,14 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
 
         if loss == 'lat_mse':
             loss = create_lat_mse(dg_train.data.lat)
+        if loss == 'lat_rmse':
+            loss = create_lat_rmse(dg_train.data.lat)
         if optimizer == 'adam':
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
             opt = keras.optimizers.Adadelta(lr)
+        elif optimizer == 'sgd':
+            opt = keras.optimizers.SGD(lr, momentum=momentum, nesterov=True)
         model.compile(opt, loss, metrics=['mse'])
         print(model.summary())
 
@@ -214,7 +230,6 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     preds.to_netcdf(f'{pred_save_dir}/{exp_id}.nc')
 
     # Print score in real units
-    # TODO: Make flexible for other states
 
     if cmip:
         return
@@ -285,10 +300,12 @@ def load_args(my_config=None):
     p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
     p.add_argument('--use_bias', type=int, default=1, help='Use bias in resnet convs')
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
+    p.add_argument('--momentum', type=float, default=0.9, help='Momentum')
     p.add_argument('--dropout', type=float, default=0, help='Dropout')
     p.add_argument('--skip', type=int, default=1, help='Add skip convs in resnet builder')
-    p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')
-    p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
+    # p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')
+    # p.add_argument('--unet_layers', type=int, default=5, help='Number of unet layers')
+    p.add_argument('--unres', type=int, default=2, nargs='+', help='Resblocks per unet partition')
     p.add_argument('--cmip', type=int, default=0, help='Is CMIP')
     p.add_argument('--cmip_dir', type=str, default=None, nargs='+', help='Dirs for CMIP data')
     p.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model')
@@ -296,6 +313,8 @@ def load_args(my_config=None):
     p.add_argument('--last_trainable_layer', type=str, default=None, help='Name of last trainable layer')
     p.add_argument('--ext_mean', type=str, default=None, help='External normalization mean')
     p.add_argument('--ext_std', type=str, default=None, help='External normalization std')
+    p.add_argument('--cont_time', type=int, default=0, help='Continuous time 0/1')
+    p.add_argument('--multi_dt', type=int, default=1, help='Differentiate through multiple time steps')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)
