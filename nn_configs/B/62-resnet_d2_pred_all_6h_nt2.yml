@@ -1,19 +1,21 @@
-exp_id: 56-resnet_wide_of
+exp_id: 62-resnet_d2_pred_all_6h_nt
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
 var_dict: {'geopotential': ('z', [100, 250, 500, 850, 1000]), 'temperature': ('t', [100, 250, 500, 850, 1000]), 'u_component_of_wind': ('u', [100, 250, 500, 850, 1000]), 'v_component_of_wind': ('v', [100, 250, 500, 850, 1000]), 'constants': ['lsm','orography','lat2d']}
-output_vars: [z_500, t_850]
-filters: [64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 2]
-kernels: [7, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 3]
-lead_time: 72
+output_vars: [z_*, t_*, u_*, v_*]
+filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 20]
+kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+lead_time: 6
 lr: 0.5e-4
-early_stopping_patience: 30
-reduce_lr_patience: 10
+early_stopping_patience: 10
+reduce_lr_patience: 5
+min_es_delta: 0.0002
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
 dropout: 0.1
 l2: 1e-5
-nt: 3
+nt: 2
+dt: 3   # Should be 6 hours right?
 loss: lat_mse

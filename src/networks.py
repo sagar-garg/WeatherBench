@@ -3,8 +3,7 @@ import tensorflow.keras as keras
 from tensorflow.keras.layers import *
 from tensorflow.keras import regularizers
 import numpy as np
-
-
+#tf.enable_eager_execution() #added. so as to be able to use numpy arrays easily
 
 def limit_mem():
     config = tf.compat.v1.ConfigProto()
@@ -72,8 +71,7 @@ class ChannelSlice(tf.keras.layers.Layer):
     def __call__(self, inputs):
         out = Lambda(self._slice)(inputs)
         return out
-
-
+    
 def convblock(inputs, filters, kernel=3, stride=1, bn_position=None, l2=0,
               use_bias=True, dropout=0, activation='relu'):
     x = inputs
@@ -100,6 +98,7 @@ def resblock(inputs, filters, kernel, bn_position=None, l2=0, use_bias=True,
         )
     if skip: x = Add()([inputs, x])
     return x
+
 
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
