@@ -28,7 +28,7 @@ class LRUpdate(object):
 def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
               lead_time, batch_size, output_vars, data_subsample, norm_subsample,
               nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, cont_time=False,
-              multi_dt=1, **kwargs):
+              multi_dt=1, verbose=0, **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
 
@@ -82,7 +82,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
     if only_test:
         return dg_test
     else:
-        print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
+        if verbose: print(f'Mean = {dg_train.mean}; Std = {dg_train.std}')
         return dg_train, dg_valid, dg_test
 
 
@@ -92,7 +92,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
-         min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt):
+         min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -179,6 +179,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
             opt = keras.optimizers.Adadelta(lr)
+        elif optimizer == 'sgd':
+            opt = keras.optimizers.SGD(lr, momentum=momentum, nesterov=True)
         model.compile(opt, loss, metrics=['mse'])
         print(model.summary())
 
@@ -298,6 +300,7 @@ def load_args(my_config=None):
     p.add_argument('--dt_in', type=int, default=1, help='Time step of intput time steps (after subsampling)')
     p.add_argument('--use_bias', type=int, default=1, help='Use bias in resnet convs')
     p.add_argument('--l2', type=float, default=0, help='Weight decay')
+    p.add_argument('--momentum', type=float, default=0.9, help='Momentum')
     p.add_argument('--dropout', type=float, default=0, help='Dropout')
     p.add_argument('--skip', type=int, default=1, help='Add skip convs in resnet builder')
     # p.add_argument('--u_skip', type=int, default=1, help='Add skip convs in unet')

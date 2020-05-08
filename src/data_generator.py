@@ -4,11 +4,12 @@ import xarray as xr
 import tensorflow.keras as keras
 import datetime
 import pdb
+import logging
 
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
-                 nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1):
+                 nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -26,7 +27,7 @@ class DataGenerator(keras.utils.Sequence):
             nt_in: How many time steps for input. AFTER data_subsample!
             dt_in: Interval of input time steps. AFTER data_subsample!
         """
-        print('DG start', datetime.datetime.now().time())
+        if verbose: print('DG start', datetime.datetime.now().time())
         self.ds = ds
         self.var_dict = var_dict
         self.batch_size = batch_size
@@ -75,7 +76,7 @@ class DataGenerator(keras.utils.Sequence):
 
 
         # Normalize
-        print('DG normalize', datetime.datetime.now().time())
+        if verbose: print('DG normalize', datetime.datetime.now().time())
         self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
             ('time', 'lat', 'lon')).compute() if mean is None else mean
         #         self.std = self.data.std('time').mean(('lat', 'lon')).compute() if std is None else std
@@ -86,9 +87,11 @@ class DataGenerator(keras.utils.Sequence):
         self.on_epoch_end()
 
         # For some weird reason calling .load() earlier messes up the mean and std computations
-        print('DG load', datetime.datetime.now().time())
-        if load: print('Loading data into RAM'); self.data.load()
-        print('DG done', datetime.datetime.now().time())
+        if verbose: print('DG load', datetime.datetime.now().time())
+        if load:
+            if verbose: print('Loading data into RAM')
+            self.data.load()
+        if verbose: print('DG done', datetime.datetime.now().time())
 
     def __len__(self):
         'Denotes the number of batches per epoch'
