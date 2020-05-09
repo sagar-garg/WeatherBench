@@ -189,19 +189,39 @@ class CombinedDataGenerator(keras.utils.Sequence):
             dg.on_epoch_end()
 
 
-def create_predictions(model, dg, multi_dt=False):
+def create_predictions(model, dg, multi_dt=False, parametric=False):
     """Create non-iterative predictions"""
+    level_names = dg.data.isel(level=dg.output_idxs).level_names
+    level = dg.data.isel(level=dg.output_idxs).level
+    if parametric:
+        # pdb.set_trace()
+        lvl = level_names.values
+        mm, ss = [], []
+        for l in lvl:
+            m = l.split('_'); s = l.split('_')
+            m[0] += '-mean'; s[0] += '-std'
+            mm.append('_'.join(m)); ss.append('_'.join(s))
+        lvl = mm + ss
+        level_names = xr.concat([level_names]*2, dim='level')
+        level_names[:] = lvl
+        level = xr.concat([level]*2, dim='level')
+
     preds = xr.DataArray(
         model.predict(dg)[0] if multi_dt else model.predict(dg),
         dims=['time', 'lat', 'lon', 'level'],
         coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                'level': dg.data.isel(level=dg.output_idxs).level,
-                'level_names': dg.data.isel(level=dg.output_idxs).level_names
+                'level': level,
+                'level_names': level_names
                 },
     )
     # Unnormalize
-    preds = (preds * dg.std.isel(level=dg.output_idxs).values +
-             dg.mean.isel(level=dg.output_idxs).values)
+    mean = dg.mean.isel(level=dg.output_idxs).values
+    std = dg.std.isel(level=dg.output_idxs).values
+    if parametric:
+        mean = np.concatenate([mean]*2)
+        std = np.concatenate([std]*2)
+    preds = preds * std + mean
+
     unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
     das = []

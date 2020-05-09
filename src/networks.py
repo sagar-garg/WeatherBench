@@ -248,6 +248,31 @@ def create_lat_rmse(lat):
         return tf.math.sqrt(tf.math.reduce_mean(mse, axis=(1, 2, 3)))
     return lat_rmse
 
+def create_lat_crps(lat, n_vars):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def crps_loss(y_true, y_pred):
+        # Split input
+        mu = y_pred[:, :, :, :n_vars]
+        sigma = y_pred[:, :, :, n_vars:]
+
+        # To stop sigma from becoming negative we first have to
+        # convert it the the variance and then take the square
+        # root again.
+        sigma = tf.math.sqrt(tf.math.square(sigma))
+
+        # The following three variables are just for convenience
+        loc = (y_true - mu) / tf.maximum(1e-7, sigma)
+        phi = 1.0 / np.sqrt(2.0 * np.pi) * tf.math.exp(-tf.math.square(loc) / 2.0)
+        Phi = 0.5 * (1.0 + tf.math.erf(loc / np.sqrt(2.0)))
+        # First we will compute the crps for each input/target pair
+        crps =  sigma * (loc * (2. * Phi - 1.) + 2 * phi - 1. / np.sqrt(np.pi))
+        crps = crps * weights_lat[None, : , None, None]
+
+        # Then we take the mean. The cost is now a scalar
+        return tf.reduce_mean(crps)
+    return crps_loss
+
 
 # Agrawal et al version
 def basic_block(x, filters, dropout):

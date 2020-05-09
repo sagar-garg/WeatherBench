@@ -92,7 +92,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          bn_position, nt_in, dt_in, use_bias, l2, skip, dropout,
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
-         min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum):
+         min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum,
+          parametric):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -175,13 +176,15 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             loss = create_lat_mse(dg_train.data.lat)
         if loss == 'lat_rmse':
             loss = create_lat_rmse(dg_train.data.lat)
+        if loss == 'lat_crps':
+            loss = create_lat_crps(dg_train.data.lat, len(dg_train.output_idxs))
         if optimizer == 'adam':
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
             opt = keras.optimizers.Adadelta(lr)
         elif optimizer == 'sgd':
             opt = keras.optimizers.SGD(lr, momentum=momentum, nesterov=True)
-        model.compile(opt, loss, metrics=['mse'])
+        model.compile(opt, loss)
         print(model.summary())
 
 
@@ -223,7 +226,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     dg_train.std.to_netcdf(f'{model_save_dir}/{exp_id}_std.nc')
 
     # Create predictions
-    preds = create_predictions(model, dg_test)
+    preds = create_predictions(model, dg_test, parametric=parametric)
     if len(preds.lat) != 32:
         preds = regrid(preds, ddeg_out=5.625)
     print(f'Saving predictions: {pred_save_dir}/{exp_id}.nc')
@@ -315,6 +318,8 @@ def load_args(my_config=None):
     p.add_argument('--ext_std', type=str, default=None, help='External normalization std')
     p.add_argument('--cont_time', type=int, default=0, help='Continuous time 0/1')
     p.add_argument('--multi_dt', type=int, default=1, help='Differentiate through multiple time steps')
+    p.add_argument('--parametric', type=int, default=0, help='Is parametric')
+
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)
