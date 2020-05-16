@@ -112,7 +112,12 @@ class DataGenerator(keras.utils.Sequence):
 
     @property
     def valid_time(self):
-        return self.data.isel(time=slice(self.nt+self.nt_offset, None)).time
+        start = self.nt+self.nt_offset
+        stop = None
+        if self.multi_dt > 1:
+            diff = self.nt - self.nt // self.multi_dt
+            start -= diff; stop = -diff
+        return self.data.isel(time=slice(start, stop)).time
 
     @property
     def n_samples(self):

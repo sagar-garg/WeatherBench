@@ -1,4 +1,4 @@
-exp_id: 99-resnet_d3_sgd
+exp_id: 105-resnet_d3_dr_0.5
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -7,19 +7,16 @@ output_vars: [z_500, t_850]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 2]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
 lead_time: 72
-lr: 0.2e-4
-early_stopping_patience: 30
-reduce_lr_patience: 10
-reduce_lr_factor: 0.5
-min_lr_times: 10
+lr: 0.5e-4
+early_stopping_patience: 10
+reduce_lr_patience: 5
+min_es_delta: 0.0001
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
-dropout: 0.1
+dropout: 0.5
 l2: 1e-5
 activation: leakyrelu
 nt: 3
 loss: lat_mse
 batch_size: 32
-optimizer: sgd
-momentum: 0.9

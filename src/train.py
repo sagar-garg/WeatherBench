@@ -3,6 +3,7 @@ from src.data_generator import *
 from src.networks import *
 from src.utils import *
 from src.regrid import regrid
+from src.clr import OneCycleLR
 import os
 import ast, re
 import numpy as np
@@ -93,7 +94,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
          min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum,
-          parametric):
+          parametric, one_cycle):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -184,6 +185,9 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             opt = keras.optimizers.Adadelta(lr)
         elif optimizer == 'sgd':
             opt = keras.optimizers.SGD(lr, momentum=momentum, nesterov=True)
+        elif optimizer == 'rmsprop':
+            opt = keras.optimizers.RMSprop(lr, momentum=momentum)
+
         model.compile(opt, loss)
         print(model.summary())
 
@@ -209,6 +213,13 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
         callbacks.append(keras.callbacks.LearningRateScheduler(
             LRUpdate(lr, lr_step, lr_divide)
         ))
+    if one_cycle:
+        callbacks.append(OneCycleLR(
+            lr,
+            maximum_momentum=None if not optimizer=='sgd' else 0.95,
+            minimum_momentum=None if not optimizer=='sgd' else 0.85,
+            verbose=1
+        ))
 
     # Train model
     # TODO: Learning rate schedule
@@ -226,7 +237,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     dg_train.std.to_netcdf(f'{model_save_dir}/{exp_id}_std.nc')
 
     # Create predictions
-    preds = create_predictions(model, dg_test, parametric=parametric)
+    preds = create_predictions(model, dg_test, parametric=parametric, multi_dt=multi_dt>1)
     if len(preds.lat) != 32:
         preds = regrid(preds, ddeg_out=5.625)
     print(f'Saving predictions: {pred_save_dir}/{exp_id}.nc')
@@ -319,7 +330,7 @@ def load_args(my_config=None):
     p.add_argument('--cont_time', type=int, default=0, help='Continuous time 0/1')
     p.add_argument('--multi_dt', type=int, default=1, help='Differentiate through multiple time steps')
     p.add_argument('--parametric', type=int, default=0, help='Is parametric')
-
+    p.add_argument('--one_cycle', type=int, default=0, help='Use OneCycle LR')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)
