@@ -1,4 +1,4 @@
-exp_id: 99-resnet_d3_sgd
+exp_id: 101-resnet_d3_5d_exp
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
@@ -6,12 +6,11 @@ var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperatu
 output_vars: [z_500, t_850]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 2]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 72
-lr: 0.2e-4
-early_stopping_patience: 30
-reduce_lr_patience: 10
-reduce_lr_factor: 0.5
-min_lr_times: 10
+lead_time: 120
+lr: 5e-5
+early_stopping_patience: 20
+lr_step: 5
+lr_divide: 2
 data_subsample: 2
 norm_subsample: 30000
 bn_position: post
@@ -21,5 +20,3 @@ activation: leakyrelu
 nt: 3
 loss: lat_mse
 batch_size: 32
-optimizer: sgd
-momentum: 0.9

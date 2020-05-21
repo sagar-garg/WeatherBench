@@ -3,6 +3,7 @@ import numpy as np
 import xarray as xr
 import tensorflow.keras as keras
 import datetime
+from src.utils import *
 import pdb
 import logging
 
@@ -112,7 +113,12 @@ class DataGenerator(keras.utils.Sequence):
 
     @property
     def valid_time(self):
-        return self.data.isel(time=slice(self.nt+self.nt_offset, None)).time
+        start = self.nt+self.nt_offset
+        stop = None
+        if self.multi_dt > 1:
+            diff = self.nt - self.nt // self.multi_dt
+            start -= diff; stop = -diff
+        return self.data.isel(time=slice(start, stop)).time
 
     @property
     def n_samples(self):
@@ -218,7 +224,7 @@ def create_predictions(model, dg, multi_dt=False, parametric=False):
     mean = dg.mean.isel(level=dg.output_idxs).values
     std = dg.std.isel(level=dg.output_idxs).values
     if parametric:
-        mean = np.concatenate([mean]*2)
+        mean = np.concatenate([mean, np.zeros_like(mean)])
         std = np.concatenate([std]*2)
     preds = preds * std + mean
 
@@ -231,6 +237,18 @@ def create_predictions(model, dg, multi_dt=False, parametric=False):
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)
+
+def create_cont_predictions(model, dg, max_lead_time=120, dt=12, lead_time=None):
+    dg.fixed_time = True
+    lead_time = np.arange(dt, max_lead_time+dt, dt) if lead_time is None else lead_time
+    lead_time = xr.DataArray(lead_time, dims={'lead_time': lead_time}, name='lead_time')
+    preds = []
+    for l in tqdm(lead_time):
+        dg.lead_time = l.values; dg.on_epoch_end()
+        p = create_predictions(model, dg)
+        p['time'] = dg.init_time
+        preds.append(p)
+    return xr.concat(preds, lead_time)
 
 # TODO: Outdated
 # def create_iterative_predictions(model, dg, max_lead_time=5 * 24):
