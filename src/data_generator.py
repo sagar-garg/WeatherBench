@@ -10,7 +10,8 @@ import logging
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
-                 nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0):
+                 nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
+                 min_lead_time=None, las_kernel=None, las_gauss_std=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -38,6 +39,7 @@ class DataGenerator(keras.utils.Sequence):
         self.dt_in = dt_in
         self.nt_offset = (nt_in - 1) * dt_in
         self.cont_time = cont_time
+        self.min_lead_time = min_lead_time
         self.fixed_time = fixed_time
         self.multi_dt = multi_dt
 
@@ -78,11 +80,28 @@ class DataGenerator(keras.utils.Sequence):
 
         # Normalize
         if verbose: print('DG normalize', datetime.datetime.now().time())
-        self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
-            ('time', 'lat', 'lon')).compute() if mean is None else mean
-        #         self.std = self.data.std('time').mean(('lat', 'lon')).compute() if std is None else std
-        self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
-            ('time', 'lat', 'lon')).compute() if std is None else std
+        if mean is not None:
+            assert std is not None, 'Both mean and std have to be given'
+            self.mean = mean; self.std = std
+        elif las_kernel is not None:
+            self.mean = compute_las(
+                self.data.isel(time=slice(0, None, norm_subsample)).mean('time'),
+                las_kernel, las_gauss_std
+            )
+            self.std = compute_las(
+                self.data.isel(time=slice(0, None, norm_subsample)).std('time'),
+                las_kernel, las_gauss_std
+            )
+            self.std[:] = np.maximum(self.std, 1e-6)
+            self.mean[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).mean(
+                ('time', 'lat', 'lon')).values[self.const_idxs]
+            self.std[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).std(
+                ('time', 'lat', 'lon')).values[self.const_idxs]
+        else:
+            self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
+                ('time', 'lat', 'lon')).compute()
+            self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
+                ('time', 'lat', 'lon')).compute()
         self.data = (self.data - self.mean) / self.std
 
         self.on_epoch_end()
@@ -129,7 +148,11 @@ class DataGenerator(keras.utils.Sequence):
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
         if self.cont_time:
             if not self.fixed_time:
-                nt = np.random.randint(1, self.nt, len(idxs))
+                if self.min_lead_time is None:
+                    min_nt = 1
+                else:
+                    min_nt = int(self.min_lead_time / self.dt)
+                nt = np.random.randint(min_nt, self.nt+1, len(idxs))
             else:
                 nt = np.ones(len(idxs), dtype='int') * self.nt
             ftime = (nt * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat),
@@ -176,6 +199,12 @@ class CombinedDataGenerator(keras.utils.Sequence):
         assert self.bss.sum() == batch_size, 'Batch sizes dont add up'
         print('Individual batch sizes:', self.bss)
         for dg, bs in zip(dgs, self.bss): dg.batch_size = int(bs)
+        self.mean = self.dgs[0].mean
+        self.std = self.dgs[0].std
+
+    @property
+    def shape (self):
+        return self.dgs[0].shape
 
     def __len__(self):
         total_samples = np.sum([len(dg.idxs) for dg in self.dgs])
