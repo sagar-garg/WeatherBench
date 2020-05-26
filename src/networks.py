@@ -239,6 +239,15 @@ def create_lat_mse(lat):
         return mse
     return lat_mse
 
+def create_lat_mae(lat):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def lat_mae(y_true, y_pred):
+        error = y_true - y_pred
+        mae = tf.abs(error) * weights_lat[None, : , None, None]
+        return mae
+    return lat_mae
+
 def create_lat_rmse(lat):
     weights_lat = np.cos(np.deg2rad(lat)).values
     weights_lat /= weights_lat.mean()
@@ -248,10 +257,39 @@ def create_lat_rmse(lat):
         return tf.math.sqrt(tf.math.reduce_mean(mse, axis=(1, 2, 3)))
     return lat_rmse
 
-def create_lat_crps(lat, n_vars):
+def create_lat_crps(lat, n_vars, relu=False):
     weights_lat = np.cos(np.deg2rad(lat)).values
     weights_lat /= weights_lat.mean()
     def crps_loss(y_true, y_pred):
+        # Split input
+        mu = y_pred[:, :, :, :n_vars]
+        sigma = y_pred[:, :, :, n_vars:]
+
+        # To stop sigma from becoming negative we first have to
+        # convert it the the variance and then take the square
+        # root again.
+        if relu:
+            sigma = tf.nn.relu(sigma)
+        else:
+            sigma = tf.math.sqrt(tf.math.square(sigma))
+
+        # The following three variables are just for convenience
+        loc = (y_true - mu) / tf.maximum(1e-7, sigma)
+        phi = 1.0 / np.sqrt(2.0 * np.pi) * tf.math.exp(-tf.math.square(loc) / 2.0)
+        Phi = 0.5 * (1.0 + tf.math.erf(loc / np.sqrt(2.0)))
+        # First we will compute the crps for each input/target pair
+        crps =  sigma * (loc * (2. * Phi - 1.) + 2 * phi - 1. / np.sqrt(np.pi))
+        crps = crps * weights_lat[None, : , None, None]
+
+        # Then we take the mean. The cost is now a scalar
+        return tf.reduce_mean(crps)
+    return crps_loss
+
+def create_lat_crps_mae(lat, n_vars, beta=1.):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def crps_mae(y_true, y_pred):
+        ### CRPS
         # Split input
         mu = y_pred[:, :, :, :n_vars]
         sigma = y_pred[:, :, :, n_vars:]
@@ -268,10 +306,44 @@ def create_lat_crps(lat, n_vars):
         # First we will compute the crps for each input/target pair
         crps =  sigma * (loc * (2. * Phi - 1.) + 2 * phi - 1. / np.sqrt(np.pi))
         crps = crps * weights_lat[None, : , None, None]
-
         # Then we take the mean. The cost is now a scalar
-        return tf.reduce_mean(crps)
-    return crps_loss
+        crps = tf.reduce_mean(crps)
+
+        ### MAE
+        error = y_true - mu
+        mae = tf.abs(error) * weights_lat[None, :, None, None]
+        mae = tf.reduce_mean(mae)
+
+        return crps + beta * mae
+    return crps_mae
+
+
+def create_lat_log_loss(lat, n_vars):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+
+    def log_loss(y_true, y_pred):
+        # Split input
+        mu = y_pred[:, :, :, :n_vars]
+        sigma = y_pred[:, :, :, n_vars:]
+        sigma = tf.nn.relu(sigma)
+
+        # Compute PDF
+        eps = 1e-7
+        sigma = tf.maximum(eps, sigma)
+        prob = 1 / sigma / np.sqrt(2 * np.pi) * tf.math.exp(
+            -0.5 * ((y_true - mu) / sigma) ** 2
+        )
+
+        # Compute log loss
+        ll = - tf.math.log(tf.maximum(prob, eps))
+        ll = ll * weights_lat[None, :, None, None]
+
+        return tf.reduce_mean(ll)
+
+    return log_loss
+
+
 
 
 # Agrawal et al version
