@@ -6,12 +6,14 @@ import datetime
 from src.utils import *
 import pdb
 import logging
+import pandas as pd
+import tensorflow.keras.utils as np_utils
 
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
-                 min_lead_time=None, las_kernel=None, las_gauss_std=None):
+                 min_lead_time=None, las_kernel=None, las_gauss_std=None, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -42,6 +44,10 @@ class DataGenerator(keras.utils.Sequence):
         self.min_lead_time = min_lead_time
         self.fixed_time = fixed_time
         self.multi_dt = multi_dt
+        self.is_categorical= is_categorical
+        self.num_bins = num_bins
+        self.bin_min= bin_min
+        self.bin_max= bin_max
 
         data = []
         level_names = []
@@ -177,6 +183,14 @@ class DataGenerator(keras.utils.Sequence):
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
         if self.cont_time: 
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
+        
+        if self.is_categorical==True:
+            bins=np.linspace(self.bin_min,self.bin_max,self.num_bins+1)
+            bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
+            y_shape=y.shape
+            y=pd.cut(y.reshape(-1), bins, labels=False).reshape(y_shape)
+            y=np_utils.to_categorical(y, num_classes=self.num_bins)
+       
         return X, y
 
     def on_epoch_end(self):
@@ -223,8 +237,8 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg in self.dgs:
             dg.on_epoch_end()
 
-
-def create_predictions(model, dg, multi_dt=False, parametric=False):
+#Check. have to do weird reshaping. Also dont know how to call num_bins since dg_valid doesnt have it.
+def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
@@ -241,15 +255,31 @@ def create_predictions(model, dg, multi_dt=False, parametric=False):
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
 
-    preds = xr.DataArray(
-        model.predict(dg)[0] if multi_dt else model.predict(dg),
-        dims=['time', 'lat', 'lon', 'level'],
-        coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                'level': level,
-                'level_names': level_names
-                },
-    )
-    # Unnormalize
+    
+    if is_categorical==True:
+        #Have to do this weird reshaping else cant unnormalize. ToDo.
+        preds=model.predict(dg)[0] if multi_dt else model.predict(dg)
+        preds=preds.reshape(preds.shape[0], preds.shape[1], preds.shape[2], preds.shape[4], preds.shape[3])
+        preds = xr.DataArray(
+            preds,
+            dims=['time', 'lat', 'lon', 'member', 'level'],
+            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                    'level': level,
+                    'member': np.arange(num_bins),
+                    'level_names': level_names,
+                    },
+        )    
+    else:
+        preds = xr.DataArray(
+            model.predict(dg)[0] if multi_dt else model.predict(dg),
+            dims=['time', 'lat', 'lon', 'level'],
+            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                    'level': level,
+                    'level_names': level_names
+                    },
+        )  
+
+# Unnormalize
     mean = dg.mean.isel(level=dg.output_idxs).values
     std = dg.std.isel(level=dg.output_idxs).values
     if parametric:
@@ -266,6 +296,7 @@ def create_predictions(model, dg, multi_dt=False, parametric=False):
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)
+
 
 def create_cont_predictions(model, dg, max_lead_time=120, dt=12, lead_time=None):
     dg.fixed_time = True

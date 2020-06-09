@@ -181,6 +181,36 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
     output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 
+def build_resnet_categorical(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
+                 skip=True, dropout=0, activation='relu', **kwargs):
+    x = input = Input(shape=input_shape)
+
+    # First conv block to get up to shape
+    x = convblock(
+        x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
+        dropout=dropout, activation=activation
+    )
+
+    # Resblocks
+    for f, k in zip(filters[1:-1], kernels[1:-1]):
+        x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
+                dropout=dropout, skip=skip, activation=activation)
+
+    # Final convolution
+    output = PeriodicConv2D(
+        filters[-1], kernels[-1],
+        conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
+    )(x)
+    #output = Activation('linear', dtype='float32')(output)
+    #removing linear activation. wont make much diff
+    
+    output_bins=int(0.5*filters[-1]) #works only for 2 variables.
+    
+    output1 = Activation('softmax', dtype='float32')(output[...,0:output_bins])
+    output2 = Activation('softmax', dtype='float32')(output[...,output_bins:filters[-1]]) #only for 2 features!
+    output= tf.keras.backend.stack((output1, output2), axis=3)
+    return keras.models.Model(input, output)
+
 
 def build_unet(input_shape, n_layers, filters_start, channels_out, kernel=3, u_skip=True,
                res_skip=True, l2=0, bn_position=None, dropout=0):
@@ -343,8 +373,17 @@ def create_lat_log_loss(lat, n_vars):
 
     return log_loss
 
+def lat_categorical_loss(lat, n_vars):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
 
-
+    def categorical_loss(y_true, y_pred):    
+        cce=tf.keras.losses.CategoricalCrossentropy()
+        loss=0 #is this ok?
+        for i in range(n_vars):
+            loss +=cce(y_true[:,:,:,i,:], y_pred[:,:,:,i,:])*weights_lat[None, :, None, None]
+        return loss    
+    return categorical_loss
 
 # Agrawal et al version
 def basic_block(x, filters, dropout):
