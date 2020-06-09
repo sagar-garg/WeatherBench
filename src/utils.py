@@ -5,6 +5,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from glob import glob
 import sys
+import pdb
+from scipy.signal import convolve
+from scipy.ndimage import gaussian_filter
 
 def in_notebook():
     """
@@ -115,3 +118,19 @@ def plot_lrf(lrf, xlim=None, ylim=None, log=False):
     if xlim is not None: plt.xlim(xlim)
     x_labels = ax.get_xticks()
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%0.0e'))
+
+def pad_periodic(arr, p):
+    arr = np.pad(arr, ((0, 0), (p, p), (0, 0)), mode='wrap')
+    arr = np.pad(arr, ((p, p), (0, 0), (0, 0)), mode='edge')
+    return arr
+
+def compute_las(da, k, gauss_std=None, omit_idxs=[]):
+    """Assume da = [lat, lon, level]"""
+    da_out = da.copy().load()
+    p = (k - 1) // 2
+    arr = pad_periodic(da_out, p)
+    arr = convolve(arr, np.ones((k, k, 1))/(k**2), mode='valid')
+    if gauss_std is not None:
+        arr = np.concatenate([gaussian_filter(arr[..., i], gauss_std) for i in range(arr.shape[-1])], -1)
+    da_out[:] = arr
+    return da_out

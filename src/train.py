@@ -29,7 +29,7 @@ class LRUpdate(object):
 def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
               lead_time, batch_size, output_vars, data_subsample, norm_subsample,
               nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, cont_time=False,
-              multi_dt=1, verbose=0, **kwargs):
+              multi_dt=1, verbose=0, las_kernel=None, las_gauss_std=None, **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
 
@@ -62,7 +62,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         dg_train = DataGenerator(
             ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
             data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in,
-            mean=ext_mean, std=ext_std, cont_time=cont_time, multi_dt=multi_dt
+            mean=ext_mean, std=ext_std, cont_time=cont_time, multi_dt=multi_dt,
+            las_kernel=las_kernel, las_gauss_std=las_gauss_std
         )
         dg_valid = DataGenerator(
             ds_valid, var_dict, lead_time, batch_size=batch_size,
@@ -70,7 +71,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             mean=ext_mean if ext_mean is not None else dg_train.mean,
             std=ext_std if ext_std is not None else dg_train.std,
             shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
-            cont_time=cont_time, multi_dt=multi_dt
+            cont_time=cont_time, multi_dt=multi_dt,
+            las_kernel=las_kernel, las_gauss_std=las_gauss_std
         )
     dg_test = DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size,
@@ -78,7 +80,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         mean=ext_mean if ext_mean is not None else dg_train.mean,
         std=ext_std if ext_std is not None else dg_train.std,
         shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
-        cont_time=cont_time, multi_dt=multi_dt
+        cont_time=cont_time, multi_dt=multi_dt,
+        las_kernel=las_kernel, las_gauss_std=las_gauss_std
     )
     if only_test:
         return dg_test
@@ -94,7 +97,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
          min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum,
-          parametric, one_cycle):
+          parametric, one_cycle, las_kernel, las_gauss_std):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -118,7 +121,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                     var_dict, datadir, cmip, cd, train_years, valid_years, test_years,
                     lead_time, batch_size, output_vars, data_subsample, norm_subsample,
                     nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-                    multi_dt=multi_dt
+                    multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -128,14 +131,14 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 var_dict, datadir, cmip, cmip_dir[0], train_years, valid_years, test_years,
                 lead_time, batch_size, output_vars, data_subsample, norm_subsample,
                 nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-                multi_dt=multi_dt
+                multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
             var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
             lead_time, batch_size, output_vars, data_subsample, norm_subsample,
             nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-            multi_dt=multi_dt
+            multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
         )
 
     # Build model
@@ -158,9 +161,6 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 dropout=dropout, activation=activation
             )
 
-        if multi_dt > 1:
-            model = create_multi_dt_model(model, multi_dt, dg_train)
-
         if pretrained_model is not None:
             # Copy over weights
             for i, l in enumerate(pretrained_model.layers):
@@ -172,13 +172,24 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 for l in model.layers:
                     l.trainable = False
                     if l.name == last_trainable_layer: break
+                    
+        if multi_dt > 1:
+            model = create_multi_dt_model(model, multi_dt, dg_train)
 
         if loss == 'lat_mse':
             loss = create_lat_mse(dg_train.data.lat)
+        if loss == 'lat_mae':
+            loss = create_lat_mae(dg_train.data.lat)
         if loss == 'lat_rmse':
             loss = create_lat_rmse(dg_train.data.lat)
         if loss == 'lat_crps':
             loss = create_lat_crps(dg_train.data.lat, len(dg_train.output_idxs))
+        if loss == 'lat_crps_relu':
+            loss = create_lat_crps(dg_train.data.lat, len(dg_train.output_idxs), relu=True)
+        if loss == 'lat_crps_mae':
+            loss = create_lat_crps_mae(dg_train.data.lat, len(dg_train.output_idxs))
+        if loss == 'lat_log_loss':
+            loss = create_lat_log_loss(dg_train.data.lat, len(dg_train.output_idxs))
         if optimizer == 'adam':
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
@@ -331,6 +342,8 @@ def load_args(my_config=None):
     p.add_argument('--multi_dt', type=int, default=1, help='Differentiate through multiple time steps')
     p.add_argument('--parametric', type=int, default=0, help='Is parametric')
     p.add_argument('--one_cycle', type=int, default=0, help='Use OneCycle LR')
+    p.add_argument('--las_kernel', type=int, default=None, help='')
+    p.add_argument('--las_gauss_std', type=int, default=None, help='')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)
