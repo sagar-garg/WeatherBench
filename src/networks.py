@@ -159,11 +159,11 @@ def build_uresnet(filters, kernels, unres, input_shape, bn_position=None, use_bi
 
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
-                 skip=True, dropout=0, activation='relu', **kwargs):
+                 skip=True, dropout=0, activation='relu', long_skip=False, **kwargs):
     x = input = Input(shape=input_shape)
 
     # First conv block to get up to shape
-    x = convblock(
+    x = ls = convblock(
         x, filters[0], kernels[0], bn_position=bn_position, l2=l2, use_bias=use_bias,
         dropout=dropout, activation=activation
     )
@@ -172,6 +172,8 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
     for f, k in zip(filters[1:-1], kernels[1:-1]):
         x = resblock(x, f, k, bn_position=bn_position, l2=l2, use_bias=use_bias,
                 dropout=dropout, skip=skip, activation=activation)
+        if long_skip:
+            x = Add()([x, ls])
 
     # Final convolution
     output = PeriodicConv2D(
@@ -297,7 +299,7 @@ def create_lat_crps_mae(lat, n_vars, beta=1.):
         # To stop sigma from becoming negative we first have to
         # convert it the the variance and then take the square
         # root again.
-        sigma = tf.math.sqrt(tf.math.square(sigma))
+        sigma = tf.nn.relu(sigma)
 
         # The following three variables are just for convenience
         loc = (y_true - mu) / tf.maximum(1e-7, sigma)

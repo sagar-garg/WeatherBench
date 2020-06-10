@@ -97,7 +97,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
          min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum,
-          parametric, one_cycle, las_kernel, las_gauss_std):
+          parametric, one_cycle, las_kernel, las_gauss_std, long_skip):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -152,7 +152,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             model = build_resnet(
                 filters, kernels, input_shape=dg_train.shape,
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
-                dropout=dropout, activation=activation
+                dropout=dropout, activation=activation, long_skip=long_skip
             )
         elif network_type == 'uresnet':
             model = build_uresnet(
@@ -344,6 +344,7 @@ def load_args(my_config=None):
     p.add_argument('--one_cycle', type=int, default=0, help='Use OneCycle LR')
     p.add_argument('--las_kernel', type=int, default=None, help='')
     p.add_argument('--las_gauss_std', type=int, default=None, help='')
+    p.add_argument('--long_skip', type=int, default=0, help='Use long skip connections 0/1')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)

@@ -53,13 +53,13 @@ def regrid(
     n_chunks = len(ds_in.time) // chunk_size + 1
     for i in range(n_chunks+1):
         ds_small = ds_in.isel(time=slice(i*chunk_size, (i+1)*chunk_size))
-        ds_list.append(regridder(ds_small).astype('float32'))
+        ds_list.append(regridder(ds_small, keep_attrs=True).astype('float32'))
     ds_out = xr.concat(ds_list, dim='time')
 
-    # Set attributes since they get lost during regridding
-    for var in ds_out:
-        ds_out[var].attrs =  ds_in[var].attrs
-    ds_out.attrs.update(ds_in.attrs)
+    # # Set attributes since they get lost during regridding
+    # for var in ds_out:
+    #     ds_out[var].attrs =  ds_in[var].attrs
+    # ds_out.attrs.update(ds_in.attrs)
 
     if rename is not None:
         if rename[0] == 'zg':

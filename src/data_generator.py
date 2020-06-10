@@ -1,17 +1,54 @@
 import re
 import numpy as np
 import xarray as xr
+import tensorflow as tf
 import tensorflow.keras as keras
 import datetime
 from src.utils import *
 import pdb
 import logging
 
+def _tensor_feature(value):
+    value = tf.io.serialize_tensor(value).numpy()
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def _bytes_feature(value):
+    """Returns a bytes_list from a string / byte."""
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def serialize_example(time, data):
+    feature = {
+        'time': _bytes_feature(time),
+        'data': _tensor_feature(data)
+    }
+    feature = tf.train.Features(feature=feature)
+    example_proto = tf.train.Example(features=feature)
+    return example_proto.SerializeToString()
+
+features = {
+    'time': tf.io.FixedLenFeature([], tf.string),
+    'data': tf.io.FixedLenFeature([], tf.string)
+}
+
+def _parse(example_proto):
+    return tf.io.parse_single_example(example_proto, features)
+
+def decode(example_proto):
+    dic = _parse(example_proto)
+    time = dic['time']
+    data = dic['data']
+    # Normalize I guess
+    return tf.io.parse_tensor(data, np.float32)
+
+
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
-                 min_lead_time=None, las_kernel=None, las_gauss_std=None):
+                 min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
+                 tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
+                 tfr_return_time=False, tfr_cycle_length=None, tfr_block_lenth=1, tfr_fpds=1,
+                 cont_dt=1, tfr_prefetch=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -42,6 +79,16 @@ class DataGenerator(keras.utils.Sequence):
         self.min_lead_time = min_lead_time
         self.fixed_time = fixed_time
         self.multi_dt = multi_dt
+        self.tfrecord_files = tfrecord_files
+        self.normalize = normalize
+        self.tfr_cycle_length = tfr_cycle_length
+        self.tfr_block_lenth = tfr_block_lenth
+        self.tfr_num_parallel_calls = tfr_num_parallel_calls
+        self.tfr_return_time = tfr_return_time
+        self.tfr_buffer_size = tfr_buffer_size
+        self.fpds = tfr_fpds
+        self.cont_dt = cont_dt
+        self.tfr_prefetch = tfr_prefetch
 
         data = []
         level_names = []
@@ -102,7 +149,8 @@ class DataGenerator(keras.utils.Sequence):
                 ('time', 'lat', 'lon')).compute()
             self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
                 ('time', 'lat', 'lon')).compute()
-        self.data = (self.data - self.mean) / self.std
+        if normalize:
+            self.data = (self.data - self.mean) / self.std
 
         self.on_epoch_end()
 
@@ -112,6 +160,9 @@ class DataGenerator(keras.utils.Sequence):
             if verbose: print('Loading data into RAM')
             self.data.load()
         if verbose: print('DG done', datetime.datetime.now().time())
+
+        if self.tfrecord_files is not None:
+            self._setup_tfrecord_ds()
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -144,6 +195,12 @@ class DataGenerator(keras.utils.Sequence):
         return self.data.isel(time=slice(0, -self.nt)).shape[0]
 
     def __getitem__(self, i):
+        if self.tfrecord_files is None:
+            return self._get_item(i)
+        else:
+            return self._get_tfrecord_item(i)
+
+    def _get_item(self, i):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
         if self.cont_time:
@@ -152,30 +209,111 @@ class DataGenerator(keras.utils.Sequence):
                     min_nt = 1
                 else:
                     min_nt = int(self.min_lead_time / self.dt)
-                nt = np.random.randint(min_nt, self.nt+1, len(idxs))
+                nt = np.random.randint(min_nt, self.nt + 1, len(idxs))
             else:
                 nt = np.ones(len(idxs), dtype='int') * self.nt
             ftime = (nt * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat),
-                                                                      len(self.data.lon)))
+                                                                   len(self.data.lon)))
         else:
             nt = self.nt
         X = self.data.isel(time=idxs).values.astype('float32')
         if self.multi_dt > 1: consts = X[..., self.const_idxs]
         if self.nt_in > 1:
             X = np.concatenate([
-                self.data.isel(time=idxs-nt_in*self.dt_in).values
-                                   for nt_in in range(self.nt_in-1, 0, -1)
-            ] + [X], axis=-1).astype('float32')
+                                   self.data.isel(time=idxs - nt_in * self.dt_in).values
+                                   for nt_in in range(self.nt_in - 1, 0, -1)
+                               ] + [X], axis=-1).astype('float32')
         if self.multi_dt > 1:
             X = [X[..., self.not_const_idxs], consts]
             step = self.nt // self.multi_dt
             y = [
                 self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
-                for nt in np.arange(step, self.nt+step, step)
+                for nt in np.arange(step, self.nt + step, step)
             ]
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
-        if self.cont_time: 
+        if self.cont_time:
+            X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
+        return X, y
+
+    def _decode(self, example_proto):
+        dic = _parse(example_proto)
+        time = dic['time']
+        data = dic['data']
+        if self.tfr_return_time:
+            return time
+        else:
+            return tf.io.parse_tensor(data, np.float32)
+
+
+    def _setup_tfrecord_ds(self):
+        # Find all files to be used
+        tfr_fns = sorted(glob(self.tfrecord_files))
+        # Split them into lists for each TFR dataset
+        list_of_fns = [tfr_fns[i*self.fpds:i*self.fpds+self.fpds] for i in range(len(tfr_fns)//self.fpds)]
+        # define windowing function
+        def window_func(fns):
+            window_size = self.lead_time + self.nt_offset + 1
+            d = tf.data.TFRecordDataset(fns)
+            d = d.map(self._decode).window(window_size, shift=1, drop_remainder=True).flat_map(
+                lambda window: window.batch(window_size))
+            if self.cont_time:
+                y_slice = slice(self.nt_offset + self.cont_dt, None, self.cont_dt)
+            else:
+                y_slice = -1
+            if self.nt_in > 1:
+                d = d.map(lambda window: ([window[n * self.dt_in] for n in range(self.nt_in)], window[y_slice]))
+            else:
+                d = d.map(lambda window: (window[0], window[y_slice]))
+            return d
+
+        # Create and iterleave datasets
+        dataset = tf.data.Dataset.from_tensor_slices(list_of_fns)
+        dataset = dataset.interleave(
+            window_func,
+            cycle_length=self.tfr_cycle_length or len(list_of_fns),
+            block_length=self.tfr_block_lenth,
+            num_parallel_calls=self.tfr_num_parallel_calls
+        )
+        if self.shuffle:
+            dataset = dataset.shuffle(
+                buffer_size=self.tfr_buffer_size, reshuffle_each_iteration=True
+            )
+        if self.tfr_prefetch is not None:
+            dataset = dataset.prefetch(self.tfr_prefetch)
+        self.tfr_dataset = dataset.repeat().batch(self.batch_size).as_numpy_iterator()
+
+
+    def _get_tfrecord_item(self, i):
+        X, y = next(self.tfr_dataset)
+
+        if self.cont_time:
+            # y will have lead_time as second dimension
+            if not self.fixed_time:
+                if self.min_lead_time is None:
+                    min_nt = 0
+                else:
+                    min_nt = int(self.min_lead_time / self.dt)
+                nt = np.random.randint(min_nt, self.nt // self.cont_dt , self.batch_size)
+            else:
+                nt = np.ones(self.batch_size, dtype='int') * self.nt // self.cont_dt
+            ftime = (nt * self.dt * self.cont_dt / 100)[:, None, None] * \
+                    np.ones((1, len(self.data.lat),len(self.data.lon)))
+            y = y[np.arange(len(y)), nt-1]
+
+        if self.normalize:
+            X = (X - self.mean.values) / self.std.values
+            y = (y - self.mean.values) / self.std.values
+
+        if self.nt_in > 1:
+            # Roll nt_in axis to the second to last position
+            X = np.rollaxis(X, 1, -1)
+            # Then combine the two last axes
+            shape = (*X.shape[:-2], -1)
+            X = X.reshape(shape)
+        y = y[..., self.output_idxs]
+
+        if self.cont_time:
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
         return X, y
 
@@ -184,6 +322,24 @@ class DataGenerator(keras.utils.Sequence):
         self.idxs = np.arange(self.nt_offset, self.n_samples)
         if self.shuffle:
             np.random.shuffle(self.idxs)
+
+    def to_tfrecord(self, savedir):
+        assert self.nt_in == 1, 'nt_in should be zero for TFRecords'
+        years = np.unique(self.data.time.dt.year)
+        months = np.arange(1, 13)
+        for year in tqdm(years):
+            for month in months:
+                time_str = f'{year}-{str(month).zfill(2)}'
+                data_slice = self.data.sel(time=time_str)
+                fn = f'{savedir}/{time_str}.tfrecord'
+                writer = tf.io.TFRecordWriter(fn)
+                for t in data_slice.time:
+                    time = str(t.values).encode('utf-8')
+                    data = self.data.sel(time=t).values.astype('float32')
+                    serialized_example = serialize_example(time, data)
+                    writer.write(serialized_example)
+                writer.close()
+
 
 
 class CombinedDataGenerator(keras.utils.Sequence):
