@@ -257,7 +257,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
     dg_train.std.to_netcdf(f'{model_save_dir}/{exp_id}_std.nc')
 
     # Create predictions
-    preds = create_predictions(model, dg_test, parametric=parametric, multi_dt=multi_dt>1, is_categorical=is_categorical, num_bins=num_bins)
+    preds = create_predictions(model, dg_test, parametric=parametric, multi_dt=multi_dt>1, is_categorical=is_categorical, num_bins=num_bins, bin_min=bin_min, bin_max=bin_max, member=num_bins)#change to whatever ensemble size needed.
     if len(preds.lat) != 32:
         preds = regrid(preds, ddeg_out=5.625)
     print(f'Saving predictions: {pred_save_dir}/{exp_id}.nc')

@@ -237,11 +237,14 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg in self.dgs:
             dg.on_epoch_end()
 
+ #Ignore create_predictions() function for now, it is completely wrong. still working on it.
+
 #Check. have to do weird reshaping. Also dont know how to call num_bins since dg_valid doesnt have it.
-def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50):
+def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5, member=100):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
+    
     if parametric:
         # pdb.set_trace()
         lvl = level_names.values
@@ -254,21 +257,28 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
         level_names = xr.concat([level_names]*2, dim='level')
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
-
     
     if is_categorical==True:
-        #Have to do this weird reshaping else cant unnormalize. ToDo.
         preds=model.predict(dg)[0] if multi_dt else model.predict(dg)
-        preds=preds.reshape(preds.shape[0], preds.shape[1], preds.shape[2], preds.shape[4], preds.shape[3])
-        preds = xr.DataArray(
-            preds,
-            dims=['time', 'lat', 'lon', 'member', 'level'],
-            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                    'level': level,
-                    'member': np.arange(num_bins),
-                    'level_names': level_names,
-                    },
-        )    
+        
+        interval=(bin_max-bin_min)/num_bins
+        bin_mids=np.linspace(bin_min+0.5*interval, bin_max-0.5*interval, num_bins)
+        
+        preds_shape=preds.shape
+        preds=preds.reshape(-1,num_bins)
+        
+        preds_new=[]
+        for i, p in enumerate(preds):
+            sample=np.random.choice(bin_mids, size=member,p=preds[i,:],replace=True)
+            preds_new.append(sample)
+        
+        preds_new=np.array(preds_new)
+        preds_new=preds_new.reshape(preds_shape[0],preds_shape[1], preds_shape[2], member, preds_shape[3])
+        
+        
+        preds = xr.DataArray(preds_new,dims=['time', 'lat', 'lon', 'member', 'level'],coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,'member': np.arange(member),'level': level,'level_names': level_names,},)
+        
+        
     else:
         preds = xr.DataArray(
             model.predict(dg)[0] if multi_dt else model.predict(dg),
@@ -277,8 +287,8 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
                     'level': level,
                     'level_names': level_names
                     },
-        )  
-
+        )
+        
 # Unnormalize
     mean = dg.mean.isel(level=dg.output_idxs).values
     std = dg.std.isel(level=dg.output_idxs).values
