@@ -181,6 +181,7 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
     output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 
+
 def build_resnet_categorical(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
                  skip=True, dropout=0, activation='relu', **kwargs):
     x = input = Input(shape=input_shape)
@@ -373,15 +374,15 @@ def create_lat_log_loss(lat, n_vars):
 
     return log_loss
 
-def lat_categorical_loss(lat, n_vars):
+def create_lat_categorical_loss(lat, n_vars):
     weights_lat = np.cos(np.deg2rad(lat)).values
     weights_lat /= weights_lat.mean()
 
     def categorical_loss(y_true, y_pred):    
-        cce=tf.keras.losses.CategoricalCrossentropy()
+        cce=tf.keras.losses.categorical_crossentropy
         loss=0 #is this ok?
         for i in range(n_vars):
-            loss +=cce(y_true[:,:,:,i,:], y_pred[:,:,:,i,:])*weights_lat[None, :, None, None]
+            loss +=cce(y_true[:,:,:,i,:], y_pred[:,:,:,i,:])*weights_lat[None, :, None, None, None]
         return loss    
     return categorical_loss
 

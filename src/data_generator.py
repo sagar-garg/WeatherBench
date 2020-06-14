@@ -240,7 +240,8 @@ class CombinedDataGenerator(keras.utils.Sequence):
  #Ignore create_predictions() function for now, it is completely wrong. still working on it.
 
 #Check. have to do weird reshaping. Also dont know how to call num_bins since dg_valid doesnt have it.
-def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5, member=100):
+def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False,
+                       num_bins=50, bin_min=-5, bin_max=5, member=None):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
@@ -258,25 +259,49 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
     
-    if is_categorical==True:
+    if is_categorical:
         preds=model.predict(dg)[0] if multi_dt else model.predict(dg)
-        
-        interval=(bin_max-bin_min)/num_bins
-        bin_mids=np.linspace(bin_min+0.5*interval, bin_max-0.5*interval, num_bins)
-        
-        preds_shape=preds.shape
-        preds=preds.reshape(-1,num_bins)
-        
-        preds_new=[]
-        for i, p in enumerate(preds):
-            sample=np.random.choice(bin_mids, size=member,p=preds[i,:],replace=True)
-            preds_new.append(sample)
-        
-        preds_new=np.array(preds_new)
-        preds_new=preds_new.reshape(preds_shape[0],preds_shape[1], preds_shape[2], member, preds_shape[3])
-        
-        
-        preds = xr.DataArray(preds_new,dims=['time', 'lat', 'lon', 'member', 'level'],coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,'member': np.arange(member),'level': level,'level_names': level_names,},)
+
+        if member is not None:   # Create emsemble forecast
+            interval=(bin_max-bin_min)/num_bins
+            bin_mids=np.linspace(bin_min+0.5*interval, bin_max-0.5*interval, num_bins)
+
+            preds_shape=preds.shape
+            preds=preds.reshape(-1,num_bins)
+
+            preds_new=[]
+            for i, p in enumerate(preds):
+                sample=np.random.choice(bin_mids, size=member,p=preds[i,:],replace=True)
+                preds_new.append(sample)
+
+            preds_new=np.array(preds_new)
+            preds_new=preds_new.reshape(preds_shape[0],preds_shape[1],
+                                        preds_shape[2], member, preds_shape[3])
+
+
+            preds = xr.DataArray(
+                preds_new,
+                dims=['time', 'lat', 'lon', 'member', 'level'],
+                coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,'member':
+                    np.arange(member),'level': level,'level_names': level_names,},
+            )
+        else:   # Return binned predictions
+            bins = np.linspace(bin_min, bin_max, num_bins+1)
+            mean = dg.mean.isel(level=dg.output_idxs).values
+            std = dg.std.isel(level=dg.output_idxs).values
+            unnormalized_bins = bins * std[:, None] + mean[:, None]
+            level_names = dg.data.isel(level=dg.output_idxs).level_names
+            level = dg.data.isel(level=dg.output_idxs).level
+            preds = xr.DataArray(
+                preds,
+                dims=['time', 'lat', 'lon', 'level', 'bin'],
+                coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                        'level': level,
+                        'level_names': level_names,
+                        'bin': np.arange(num_bins),
+                        },
+            )
+
         
         
     else:
@@ -288,14 +313,15 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
                     'level_names': level_names
                     },
         )
-        
-# Unnormalize
-    mean = dg.mean.isel(level=dg.output_idxs).values
-    std = dg.std.isel(level=dg.output_idxs).values
-    if parametric:
-        mean = np.concatenate([mean, np.zeros_like(mean)])
-        std = np.concatenate([std]*2)
-    preds = preds * std + mean
+
+    if not is_categorical and member is None:
+        # Unnormalize
+        mean = dg.mean.isel(level=dg.output_idxs).values
+        std = dg.std.isel(level=dg.output_idxs).values
+        if parametric:
+            mean = np.concatenate([mean, np.zeros_like(mean)])
+            std = np.concatenate([std]*2)
+        preds = preds * std + mean
 
     unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
@@ -303,6 +329,10 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
     for v in unique_vars:
         idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] in v]
         da = preds.isel(level=idxs).squeeze().drop('level_names')
+        bin_edges = unnormalized_bins[idxs].squeeze()
+        da.attrs['bin_edges'] = bin_edges
+        da.attrs['mid_points'] = (bin_edges[1:] + bin_edges[:-1]) / 2
+        da.attrs['bin_width'] = bin_edges[1] - bin_edges[0]
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)

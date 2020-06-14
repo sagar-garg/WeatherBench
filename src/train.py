@@ -72,7 +72,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             std=ext_std if ext_std is not None else dg_train.std,
             shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
             cont_time=cont_time, multi_dt=multi_dt,
-            las_kernel=las_kernel, las_gauss_std=las_gauss_std
+            las_kernel=las_kernel, las_gauss_std=las_gauss_std, is_categorical=is_categorical, num_bins=num_bins, bin_min=bin_min, bin_max=bin_max
         )
     dg_test = DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size,
@@ -81,7 +81,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         std=ext_std if ext_std is not None else dg_train.std,
         shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
         cont_time=cont_time, multi_dt=multi_dt,
-        las_kernel=las_kernel, las_gauss_std=las_gauss_std
+        las_kernel=las_kernel, las_gauss_std=las_gauss_std, is_categorical=is_categorical, num_bins=num_bins, bin_min=bin_min, bin_max=bin_max
     )
     if only_test:
         return dg_test
@@ -149,7 +149,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
 
     with mirrored_strategy.scope():
         if network_type == 'resnet':
-            if is_categorical== True:
+            if is_categorical:
                 model = build_resnet_categorical(
                 filters, kernels, input_shape=dg_train.shape,
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
@@ -198,7 +198,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
         if loss == 'lat_log_loss':
             loss = create_lat_log_loss(dg_train.data.lat, len(dg_train.output_idxs))
         if loss == 'lat_categorical_loss': #need to check
-            loss = lat_categorical_loss(dg_train.data.lat, len(dg_train.output_idxs))
+            loss = create_lat_categorical_loss(dg_train.data.lat, len(dg_train.output_idxs))
         if optimizer == 'adam':
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
