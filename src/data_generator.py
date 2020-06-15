@@ -329,10 +329,11 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
     for v in unique_vars:
         idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] in v]
         da = preds.isel(level=idxs).squeeze().drop('level_names')
-        bin_edges = unnormalized_bins[idxs].squeeze()
-        da.attrs['bin_edges'] = bin_edges
-        da.attrs['mid_points'] = (bin_edges[1:] + bin_edges[:-1]) / 2
-        da.attrs['bin_width'] = bin_edges[1] - bin_edges[0]
+        if is_categorical and member is None:
+            bin_edges = unnormalized_bins[idxs].squeeze()
+            da.attrs['bin_edges'] = bin_edges
+            da.attrs['mid_points'] = (bin_edges[1:] + bin_edges[:-1]) / 2
+            da.attrs['bin_width'] = bin_edges[1] - bin_edges[0]
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)
