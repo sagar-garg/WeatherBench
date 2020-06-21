@@ -31,6 +31,27 @@ class PeriodicPadding2D(tf.keras.layers.Layer):
         return config
 
 
+class ChannelReLU2D(tf.keras.layers.Layer):
+    def __init__(self, relu_idxs, **kwargs):
+        super().__init__(**kwargs)
+        self.relu_idxs = relu_idxs if type(relu_idxs) is list else [relu_idxs]
+
+    def call(self, inputs, **kwargs):
+        if inputs.shape[-1] == len(self.relu_idxs):
+            return tf.nn.relu(inputs)
+        else:
+            channels = [inputs[..., i] for i in range(inputs.shape[-1])]
+            for i, t in enumerate(channels):
+                if i in self.relu_idxs:
+                    channels[i] = tf.nn.relu(t)
+            return tf.stack(channels, -1)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'relu_idxs': self.relu_idxs})
+        return config
+
+
 class PeriodicConv2D(tf.keras.layers.Layer):
     def __init__(self, filters,
                  kernel_size,
@@ -159,7 +180,8 @@ def build_uresnet(filters, kernels, unres, input_shape, bn_position=None, use_bi
 
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
-                 skip=True, dropout=0, activation='relu', long_skip=False, **kwargs):
+                 skip=True, dropout=0, activation='relu', long_skip=False, relu_idxs=None,
+                 **kwargs):
     x = input = Input(shape=input_shape)
 
     # First conv block to get up to shape
@@ -180,6 +202,8 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
         filters[-1], kernels[-1],
         conv_kwargs={'kernel_regularizer': regularizers.l2(l2)},
     )(x)
+    if not relu_idxs is None:
+        output = ChannelReLU2D(relu_idxs)(output)
     output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 

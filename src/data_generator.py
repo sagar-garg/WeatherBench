@@ -7,6 +7,7 @@ import datetime
 from src.utils import *
 import pdb
 import logging
+from tqdm import tqdm
 
 def _tensor_feature(value):
     value = tf.io.serialize_tensor(value).numpy()
@@ -48,7 +49,7 @@ class DataGenerator(keras.utils.Sequence):
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
                  tfr_return_time=False, tfr_cycle_length=None, tfr_block_lenth=1, tfr_fpds=1,
-                 cont_dt=1, tfr_prefetch=None):
+                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -89,6 +90,8 @@ class DataGenerator(keras.utils.Sequence):
         self.fpds = tfr_fpds
         self.cont_dt = cont_dt
         self.tfr_prefetch = tfr_prefetch
+        self.tfr_repeat = tfr_repeat
+        self.y_nt = y_nt
 
         data = []
         level_names = []
@@ -110,6 +113,8 @@ class DataGenerator(keras.utils.Sequence):
                     level_names.append(var)
 
         self.data = xr.concat(data, 'level').transpose('time', 'lat', 'lon', 'level')
+        if discard_first is not None:
+            self.data = self.data.isel(time=slice(discard_first, None))
         self.data['level_names'] = xr.DataArray(
             level_names, dims=['level'], coords={'level': self.data.level})
         if output_vars is None:
@@ -122,6 +127,7 @@ class DataGenerator(keras.utils.Sequence):
 
         # Subsample
         self.data = self.data.isel(time=slice(0, None, data_subsample))
+        self.raw_data = self.data
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
 
 
@@ -130,25 +136,14 @@ class DataGenerator(keras.utils.Sequence):
         if mean is not None:
             assert std is not None, 'Both mean and std have to be given'
             self.mean = mean; self.std = std
-        elif las_kernel is not None:
-            self.mean = compute_las(
-                self.data.isel(time=slice(0, None, norm_subsample)).mean('time'),
-                las_kernel, las_gauss_std
-            )
-            self.std = compute_las(
-                self.data.isel(time=slice(0, None, norm_subsample)).std('time'),
-                las_kernel, las_gauss_std
-            )
-            self.std[:] = np.maximum(self.std, 1e-6)
-            self.mean[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).mean(
-                ('time', 'lat', 'lon')).values[self.const_idxs]
-            self.std[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).std(
-                ('time', 'lat', 'lon')).values[self.const_idxs]
         else:
             self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
                 ('time', 'lat', 'lon')).compute()
             self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
                 ('time', 'lat', 'lon')).compute()
+            if 'tp' in self.data.level_names:  # set tp mean to zero but not if ext
+                tp_idx = list(self.data.level_names).index('tp')
+                self.mean.values[tp_idx] = 0
         if normalize:
             self.data = (self.data - self.mean) / self.std
 
@@ -160,6 +155,11 @@ class DataGenerator(keras.utils.Sequence):
             if verbose: print('Loading data into RAM')
             self.data.load()
         if verbose: print('DG done', datetime.datetime.now().time())
+
+        if self.y_nt is not None:
+            self.y_nt = int(self.y_nt // self.dt)
+            assert self.y_nt < self.nt, 'nt must be larger than y_nt'
+            self.y_roll = self.data.isel(level=self.output_idxs).rolling(time=self.y_nt).mean()
 
         if self.tfrecord_files is not None:
             self._setup_tfrecord_ds()
@@ -230,6 +230,10 @@ class DataGenerator(keras.utils.Sequence):
                 self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
                 for nt in np.arange(step, self.nt + step, step)
             ]
+        elif self.y_nt is not None:
+            y = self.y_roll.isel(
+                time=idxs + nt,
+            ).values.astype('float32')
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
         if self.cont_time:
@@ -248,23 +252,35 @@ class DataGenerator(keras.utils.Sequence):
 
     def _setup_tfrecord_ds(self):
         # Find all files to be used
-        tfr_fns = sorted(glob(self.tfrecord_files))
+        if type(self.tfrecord_files) is list:
+            tfr_fns = self.tfrecord_files
+        else:
+            tfr_fns = sorted(glob(self.tfrecord_files))
         # Split them into lists for each TFR dataset
         list_of_fns = [tfr_fns[i*self.fpds:i*self.fpds+self.fpds] for i in range(len(tfr_fns)//self.fpds)]
+        self.list_of_fns = list_of_fns
         # define windowing function
         def window_func(fns):
             window_size = self.lead_time + self.nt_offset + 1
             d = tf.data.TFRecordDataset(fns)
             d = d.map(self._decode).window(window_size, shift=1, drop_remainder=True).flat_map(
                 lambda window: window.batch(window_size))
-            if self.cont_time:
-                y_slice = slice(self.nt_offset + self.cont_dt, None, self.cont_dt)
-            else:
-                y_slice = -1
-            if self.nt_in > 1:
-                d = d.map(lambda window: ([window[n * self.dt_in] for n in range(self.nt_in)], window[y_slice]))
-            else:
-                d = d.map(lambda window: (window[0], window[y_slice]))
+
+            def slice_func(window):
+                if self.nt_in > 1:
+                    X = [window[n * self.dt_in] for n in range(self.nt_in)]
+                else:
+                    X = window[0]
+                if self.cont_time:
+                    if self.fixed_time:
+                        y_idx = self.nt + self.nt_offset
+                    else:
+                        y_idx = tf.random.uniform([1], self.nt_offset + 1, window_size, dtype=tf.int32)[0]
+                    return X, window[y_idx], y_idx - self.nt_offset
+                else:
+                    y_idx = -1
+                    return X, window[y_idx]
+            d = d.map(slice_func)
             return d
 
         # Create and iterleave datasets
@@ -275,31 +291,26 @@ class DataGenerator(keras.utils.Sequence):
             block_length=self.tfr_block_lenth,
             num_parallel_calls=self.tfr_num_parallel_calls
         )
+        self.raw_dataset = dataset
         if self.shuffle:
             dataset = dataset.shuffle(
                 buffer_size=self.tfr_buffer_size, reshuffle_each_iteration=True
             )
+
+        self.tfr_dataset = dataset.batch(self.batch_size)
+        if self.tfr_repeat:
+            self.tfr_dataset = self.tfr_dataset.repeat()
         if self.tfr_prefetch is not None:
-            dataset = dataset.prefetch(self.tfr_prefetch)
-        self.tfr_dataset = dataset.repeat().batch(self.batch_size).as_numpy_iterator()
+            self.tfr_dataset = self.tfr_dataset.prefetch(self.tfr_prefetch)
+        self.tfr_dataset = self.tfr_dataset.as_numpy_iterator()
 
 
     def _get_tfrecord_item(self, i):
-        X, y = next(self.tfr_dataset)
-
         if self.cont_time:
-            # y will have lead_time as second dimension
-            if not self.fixed_time:
-                if self.min_lead_time is None:
-                    min_nt = 0
-                else:
-                    min_nt = int(self.min_lead_time / self.dt)
-                nt = np.random.randint(min_nt, self.nt // self.cont_dt , self.batch_size)
-            else:
-                nt = np.ones(self.batch_size, dtype='int') * self.nt // self.cont_dt
-            ftime = (nt * self.dt * self.cont_dt / 100)[:, None, None] * \
-                    np.ones((1, len(self.data.lat),len(self.data.lon)))
-            y = y[np.arange(len(y)), nt-1]
+            X, y, y_idxs = next(self.tfr_dataset)
+            ftime = ((y_idxs * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat), len(self.data.lon))))
+        else:
+            X, y = next(self.tfr_dataset)
 
         if self.normalize:
             X = (X - self.mean.values) / self.std.values
@@ -380,7 +391,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
             dg.on_epoch_end()
 
 
-def create_predictions(model, dg, multi_dt=False, parametric=False):
+def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
@@ -397,8 +408,13 @@ def create_predictions(model, dg, multi_dt=False, parametric=False):
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
 
+    if dg.tfrecord_files is None:
+        preds = model.predict(dg, verbose=verbose)
+    else:   # Necessary because my tfr implementation is the biggest mess
+        preds = tfr_predict(model, dg, verbose=verbose)
+
     preds = xr.DataArray(
-        model.predict(dg)[0] if multi_dt else model.predict(dg),
+        preds[0] if multi_dt else preds,
         dims=['time', 'lat', 'lon', 'level'],
         coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
                 'level': level,

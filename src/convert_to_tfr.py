@@ -4,7 +4,8 @@ from configargparse import ArgParser
 import ast, os
 
 def convert_to_tfr(savedir, var_dict, datadir, years, cmip=False, cmip_dir=None, compute_norm=True,
-                   norm_subsample=30000, data_subsample=1):
+                   norm_subsample=30000, data_subsample=1, gpu=0):
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     os.makedirs(savedir, exist_ok=True)
     # Open dataset and create data generators
     if cmip:
@@ -47,9 +48,10 @@ if __name__ == '__main__':
     p.add_argument('--years', type=str, nargs='+', default=('1979', '2018'), help='Start/stop years')
     p.add_argument('--cmip', type=int, default=0, help='Is CMIP')
     p.add_argument('--cmip_dir', type=str, default=None, nargs='+', help='Dirs for CMIP data')
-    p.add_argument('--compute_norm', type=int, default=1, help='Is CMIP')
+    p.add_argument('--compute_norm', type=int, default=1, help='')
     p.add_argument('--data_subsample', type=int, default=1, help='Subsampling for training data')
     p.add_argument('--norm_subsample', type=int, default=1, help='Subsampling for mean/std')
+    p.add_argument('--gpu', type=int, default=0, help='Which GPU')
     args = p.parse_args()
     args.var_dict = ast.literal_eval(args.var_dict)
     convert_to_tfr(args.savedir, args.var_dict, args.datadir, args.years, args.cmip, args.cmip_dir,

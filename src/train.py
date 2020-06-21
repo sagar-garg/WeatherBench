@@ -29,7 +29,11 @@ class LRUpdate(object):
 def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
               lead_time, batch_size, output_vars, data_subsample, norm_subsample,
               nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, cont_time=False,
-              multi_dt=1, verbose=0, las_kernel=None, las_gauss_std=None, **kwargs):
+              multi_dt=1, verbose=0, las_kernel=None, las_gauss_std=None,
+              tfrecord_files=None, tfr_cycle_length=1, tfr_num_parallel_calls=1,
+              tfr_buffer_size=1000, tfr_fpds=1, tfr_prefetch=None, y_nt=None, discard_first=None,
+              min_lead_time=None,
+              **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
 
@@ -58,13 +62,32 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
     ds_valid = ds.sel(time=slice(*valid_years))
     ds_test = ds.sel(time=slice(*test_years))
 
+    if tfrecord_files is not None:
+        tfrecord_files = sorted(glob(tfrecord_files))
+        train_files = [t for t in tfrecord_files if int(t.split('/')[-1].split('-')[0]) in
+                       range(int(train_years[0]), int(train_years[1])+1)]
+        valid_files = [t for t in tfrecord_files if int(t.split('/')[-1].split('-')[0]) in
+                       range(int(valid_years[0]), int(valid_years[1]) + 1)]
+        test_files = [t for t in tfrecord_files if int(t.split('/')[-1].split('-')[0]) in
+                      range(int(test_years[0]), int(test_years[1]) + 1)]
+        load = False
+    else:
+        train_files = valid_files = test_files = None
+        load = True
+
     if not only_test:
         dg_train = DataGenerator(
             ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
             data_subsample=data_subsample, norm_subsample=norm_subsample, nt_in=nt_in, dt_in=dt_in,
-            mean=ext_mean, std=ext_std, cont_time=cont_time, multi_dt=multi_dt,
-            las_kernel=las_kernel, las_gauss_std=las_gauss_std
+            mean=ext_mean, std=ext_std, cont_time=cont_time, load=load,
+            las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+            tfrecord_files=train_files, tfr_cycle_length=tfr_cycle_length,
+            tfr_num_parallel_calls=tfr_num_parallel_calls,
+            tfr_buffer_size=tfr_buffer_size, tfr_fpds=tfr_fpds,
+            tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
+            min_lead_time=min_lead_time
         )
+
         dg_valid = DataGenerator(
             ds_valid, var_dict, lead_time, batch_size=batch_size,
             data_subsample=data_subsample,
@@ -72,8 +95,14 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             std=ext_std if ext_std is not None else dg_train.std,
             shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
             cont_time=cont_time, multi_dt=multi_dt,
-            las_kernel=las_kernel, las_gauss_std=las_gauss_std
+            las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+            tfrecord_files=valid_files, tfr_cycle_length=1,
+            tfr_num_parallel_calls=1,
+            tfr_buffer_size=1, tfr_fpds=len(valid_files or []),
+            tfr_prefetch=None, y_nt=y_nt,
+            min_lead_time=min_lead_time
         )
+
     dg_test = DataGenerator(
         ds_test, var_dict, lead_time, batch_size=batch_size,
         data_subsample=data_subsample,
@@ -81,7 +110,12 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         std=ext_std if ext_std is not None else dg_train.std,
         shuffle=False, output_vars=output_vars, nt_in=nt_in, dt_in=dt_in,
         cont_time=cont_time, multi_dt=multi_dt,
-        las_kernel=las_kernel, las_gauss_std=las_gauss_std
+        las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+        tfrecord_files=test_files, tfr_cycle_length=1,
+        tfr_num_parallel_calls=1,
+        tfr_buffer_size=1, tfr_fpds=len(test_files or []),
+        tfr_prefetch=None, y_nt=y_nt,
+        min_lead_time=min_lead_time
     )
     if only_test:
         return dg_test
@@ -97,7 +131,10 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          reduce_lr_patience, reduce_lr_factor, min_lr_times, unres, loss,
          cmip, cmip_dir, pretrained_model, last_pretrained_layer, last_trainable_layer,
          min_es_delta, optimizer, activation, ext_mean, ext_std, cont_time, multi_dt, momentum,
-          parametric, one_cycle, las_kernel, las_gauss_std, long_skip):
+         parametric, one_cycle, las_kernel, las_gauss_std, long_skip,
+         tfrecord_files, tfr_cycle_length,tfr_num_parallel_calls, tfr_buffer_size, tfr_fpds,
+         tfr_prefetch, y_nt, discard_first, min_lead_time, relu_idxs
+      ):
     print(type(var_dict))
 
     # os.environ["CUDA_VISIBLE_DEVICES"]=str(2)
@@ -121,7 +158,12 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                     var_dict, datadir, cmip, cd, train_years, valid_years, test_years,
                     lead_time, batch_size, output_vars, data_subsample, norm_subsample,
                     nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-                    multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
+                    multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+                    tfrecord_files=tfrecord_files, tfr_cycle_length=tfr_cycle_length,
+                    tfr_num_parallel_calls=tfr_num_parallel_calls,
+                    tfr_buffer_size=tfr_buffer_size, tfr_fpds=tfr_fpds,
+                    tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
+                    min_lead_time=min_lead_time
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -131,14 +173,24 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 var_dict, datadir, cmip, cmip_dir[0], train_years, valid_years, test_years,
                 lead_time, batch_size, output_vars, data_subsample, norm_subsample,
                 nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-                multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
+                multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+                tfrecord_files=tfrecord_files, tfr_cycle_length=tfr_cycle_length,
+                tfr_num_parallel_calls=tfr_num_parallel_calls,
+                tfr_buffer_size=tfr_buffer_size, tfr_fpds=tfr_fpds,
+                tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
+                min_lead_time=min_lead_time
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
             var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_years,
             lead_time, batch_size, output_vars, data_subsample, norm_subsample,
             nt_in, dt_in, ext_mean=ext_mean, ext_std=ext_std, cont_time=cont_time,
-            multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std
+            multi_dt=multi_dt, las_kernel=las_kernel, las_gauss_std=las_gauss_std,
+            tfrecord_files=tfrecord_files, tfr_cycle_length=tfr_cycle_length,
+            tfr_num_parallel_calls=tfr_num_parallel_calls,
+            tfr_buffer_size=tfr_buffer_size, tfr_fpds=tfr_fpds,
+            tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
+            min_lead_time=min_lead_time
         )
 
     # Build model
@@ -152,7 +204,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             model = build_resnet(
                 filters, kernels, input_shape=dg_train.shape,
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
-                dropout=dropout, activation=activation, long_skip=long_skip
+                dropout=dropout, activation=activation, long_skip=long_skip,
+                relu_idxs=relu_idxs
             )
         elif network_type == 'uresnet':
             model = build_uresnet(
@@ -345,6 +398,19 @@ def load_args(my_config=None):
     p.add_argument('--las_kernel', type=int, default=None, help='')
     p.add_argument('--las_gauss_std', type=int, default=None, help='')
     p.add_argument('--long_skip', type=int, default=0, help='Use long skip connections 0/1')
+
+    p.add_argument('--tfrecord_files', type=str, default=None, help='TFR regex')
+    p.add_argument('--tfr_cycle_length', type=int, default=1, help='')
+    p.add_argument('--tfr_num_parallel_calls', type=int, default=1, help='')
+    p.add_argument('--tfr_buffer_size', type=int, default=100, help='')
+    p.add_argument('--tfr_fpds', type=int, default=1, help='')
+    p.add_argument('--tfr_prefetch', type=int, default=None, help='')
+
+    p.add_argument('--min_lead_time', type=int, default=None, help='for cont.')
+    p.add_argument('--y_nt', type=int, default=None, help='In hours.')
+    p.add_argument('--discard_first', type=int, default=None, help='Discard first x time steps in train generator')
+
+    p.add_argument('--relu_idxs', type=int, default=None, nargs='+', help='for tp')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)
