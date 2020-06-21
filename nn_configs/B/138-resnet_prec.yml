@@ -2,7 +2,7 @@ exp_id: 138-resnet_prec
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
-var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), '6hr_precipitation': ('tp', None), 'constants': ['lsm','orography','lat2d']}
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'toa_incident_solar_radiation': ('tisr', None), '6hr_precipitation': ('tp', None), 'constants': ['lsm','orography','lat2d']}
 output_vars: [tp]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
@@ -21,3 +21,5 @@ nt: 3
 loss: lat_mse
 batch_size: 32
 relu_idxs: 0
+tp_log: 0.001
+discard_first: 24

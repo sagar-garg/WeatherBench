@@ -157,3 +157,9 @@ def tfr_predict(model, dg, verbose=0):
         X, y = dg[_]
         preds_tfr.append(model(X))
     return np.concatenate(preds_tfr)
+
+def log_trans(x, e):
+    return np.log(x + e) - np.log(e)
+
+def log_retrans(x, e):
+    return np.exp(x + np.log(e)) - e

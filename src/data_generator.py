@@ -47,7 +47,8 @@ class DataGenerator(keras.utils.Sequence):
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
-                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None):
+                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None,
+                 tp_log=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -124,6 +125,17 @@ class DataGenerator(keras.utils.Sequence):
         self.raw_data = self.data
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
 
+        if verbose: print('DG load', datetime.datetime.now().time())
+        if load:
+            if verbose: print('Loading data into RAM')
+            self.data.load()
+        if verbose: print('DG done', datetime.datetime.now().time())
+
+        # Apply transforms
+        if tp_log is not None:
+            # pdb.set_trace()
+            tp_idx = list(self.data.level_names).index('tp')
+            self.data.values[..., tp_idx] = log_trans(self.data.values[..., tp_idx], tp_log)
 
         # Normalize
         if verbose: print('DG normalize', datetime.datetime.now().time())
@@ -138,17 +150,13 @@ class DataGenerator(keras.utils.Sequence):
             if 'tp' in self.data.level_names:  # set tp mean to zero but not if ext
                 tp_idx = list(self.data.level_names).index('tp')
                 self.mean.values[tp_idx] = 0
+                if tp_log is not None:
+                    self.mean.attrs['tp_log'] = tp_log
+                    self.std.attrs['tp_log'] = tp_log
         if normalize:
             self.data = (self.data - self.mean) / self.std
 
         self.on_epoch_end()
-
-        # For some weird reason calling .load() earlier messes up the mean and std computations
-        if verbose: print('DG load', datetime.datetime.now().time())
-        if load:
-            if verbose: print('Loading data into RAM')
-            self.data.load()
-        if verbose: print('DG done', datetime.datetime.now().time())
 
         if self.y_nt is not None:
             self.y_nt = int(self.y_nt // self.dt)
@@ -361,6 +369,11 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
         mean = np.concatenate([mean, np.zeros_like(mean)])
         std = np.concatenate([std]*2)
     preds = preds * std + mean
+
+    # Reverse tranforms
+    if hasattr(dg.mean, 'tp_log'):
+        tp_idx = list(preds.level_names).index('tp')
+        preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
 
     unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
