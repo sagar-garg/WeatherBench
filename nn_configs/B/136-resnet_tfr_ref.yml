@@ -21,13 +21,10 @@ nt: 3
 loss: lat_mse
 batch_size: 32
 
-tfrecord_files: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/*.tfrecord
-ext_mean: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/mean.nc
-ext_std: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/std.nc
-tfr_cycle_length: 27
-tfr_num_parallel_calls: 27
+train_tfr_files: /data/stephan/WeatherBench/TFR/001-era_std_in_zt_out_3d/train/*.tfrecord
+valid_tfr_files: /data/stephan/WeatherBench/TFR/001-era_std_in_zt_out_3d/valid/*.tfrecord
+test_tfr_files: /data/stephan/WeatherBench/TFR/001-era_std_in_zt_out_3d/test/*.tfrecord
+ext_mean: /data/stephan/WeatherBench/TFR/001-era_std_in_zt_out_3d/mean.nc
+ext_std: /data/stephan/WeatherBench/TFR/001-era_std_in_zt_out_3d/std.nc
+tfr_num_parallel_calls: 20
 tfr_buffer_size: 1000
-tfr_fpds: 7
-tfr_prefetch: 2
-
-train_years: [2000, 2015]

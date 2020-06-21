@@ -17,18 +17,18 @@ def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-def serialize_example(time, data):
+def serialize_example(X, y):
     feature = {
-        'time': _bytes_feature(time),
-        'data': _tensor_feature(data)
+        'X': _tensor_feature(X),
+        'y': _tensor_feature(y)
     }
     feature = tf.train.Features(feature=feature)
     example_proto = tf.train.Example(features=feature)
     return example_proto.SerializeToString()
 
 features = {
-    'time': tf.io.FixedLenFeature([], tf.string),
-    'data': tf.io.FixedLenFeature([], tf.string)
+    'X': tf.io.FixedLenFeature([], tf.string),
+    'y': tf.io.FixedLenFeature([], tf.string)
 }
 
 def _parse(example_proto):
@@ -36,10 +36,9 @@ def _parse(example_proto):
 
 def decode(example_proto):
     dic = _parse(example_proto)
-    time = dic['time']
-    data = dic['data']
-    # Normalize I guess
-    return tf.io.parse_tensor(data, np.float32)
+    X = tf.io.parse_tensor(dic['X'], np.float32)
+    y = tf.io.parse_tensor(dic['y'], np.float32)
+    return X, y
 
 
 class DataGenerator(keras.utils.Sequence):
@@ -48,7 +47,6 @@ class DataGenerator(keras.utils.Sequence):
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
-                 tfr_return_time=False, tfr_cycle_length=None, tfr_block_lenth=1, tfr_fpds=1,
                  cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None):
         """
         Data generator for WeatherBench data.
@@ -82,12 +80,8 @@ class DataGenerator(keras.utils.Sequence):
         self.multi_dt = multi_dt
         self.tfrecord_files = tfrecord_files
         self.normalize = normalize
-        self.tfr_cycle_length = tfr_cycle_length
-        self.tfr_block_lenth = tfr_block_lenth
         self.tfr_num_parallel_calls = tfr_num_parallel_calls
-        self.tfr_return_time = tfr_return_time
         self.tfr_buffer_size = tfr_buffer_size
-        self.fpds = tfr_fpds
         self.cont_dt = cont_dt
         self.tfr_prefetch = tfr_prefetch
         self.tfr_repeat = tfr_repeat
@@ -162,7 +156,16 @@ class DataGenerator(keras.utils.Sequence):
             self.y_roll = self.data.isel(level=self.output_idxs).rolling(time=self.y_nt).mean()
 
         if self.tfrecord_files is not None:
+            self.is_tfr = True
             self._setup_tfrecord_ds()
+        else:
+            self.is_tfr = False
+
+    def on_epoch_end(self):
+        'Updates indexes after each epoch'
+        self.idxs = np.arange(self.nt_offset, self.n_samples)
+        if self.shuffle:
+            np.random.shuffle(self.idxs)
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -240,15 +243,6 @@ class DataGenerator(keras.utils.Sequence):
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
         return X, y
 
-    def _decode(self, example_proto):
-        dic = _parse(example_proto)
-        time = dic['time']
-        data = dic['data']
-        if self.tfr_return_time:
-            return time
-        else:
-            return tf.io.parse_tensor(data, np.float32)
-
 
     def _setup_tfrecord_ds(self):
         # Find all files to be used
@@ -256,100 +250,41 @@ class DataGenerator(keras.utils.Sequence):
             tfr_fns = self.tfrecord_files
         else:
             tfr_fns = sorted(glob(self.tfrecord_files))
-        # Split them into lists for each TFR dataset
-        list_of_fns = [tfr_fns[i*self.fpds:i*self.fpds+self.fpds] for i in range(len(tfr_fns)//self.fpds)]
-        self.list_of_fns = list_of_fns
-        # define windowing function
-        def window_func(fns):
-            window_size = self.lead_time + self.nt_offset + 1
-            d = tf.data.TFRecordDataset(fns)
-            d = d.map(self._decode).window(window_size, shift=1, drop_remainder=True).flat_map(
-                lambda window: window.batch(window_size))
 
-            def slice_func(window):
-                if self.nt_in > 1:
-                    X = [window[n * self.dt_in] for n in range(self.nt_in)]
-                else:
-                    X = window[0]
-                if self.cont_time:
-                    if self.fixed_time:
-                        y_idx = self.nt + self.nt_offset
-                    else:
-                        y_idx = tf.random.uniform([1], self.nt_offset + 1, window_size, dtype=tf.int32)[0]
-                    return X, window[y_idx], y_idx - self.nt_offset
-                else:
-                    y_idx = -1
-                    return X, window[y_idx]
-            d = d.map(slice_func)
-            return d
+        dataset = tf.data.TFRecordDataset(
+            tfr_fns, num_parallel_reads=self.tfr_num_parallel_calls
+        ).map(decode)
 
-        # Create and iterleave datasets
-        dataset = tf.data.Dataset.from_tensor_slices(list_of_fns)
-        dataset = dataset.interleave(
-            window_func,
-            cycle_length=self.tfr_cycle_length or len(list_of_fns),
-            block_length=self.tfr_block_lenth,
-            num_parallel_calls=self.tfr_num_parallel_calls
-        )
-        self.raw_dataset = dataset
         if self.shuffle:
             dataset = dataset.shuffle(
                 buffer_size=self.tfr_buffer_size, reshuffle_each_iteration=True
             )
 
         self.tfr_dataset = dataset.batch(self.batch_size)
-        if self.tfr_repeat:
-            self.tfr_dataset = self.tfr_dataset.repeat()
+        # if self.tfr_repeat:
+        #     self.tfr_dataset = self.tfr_dataset.repeat()
         if self.tfr_prefetch is not None:
             self.tfr_dataset = self.tfr_dataset.prefetch(self.tfr_prefetch)
-        self.tfr_dataset = self.tfr_dataset.as_numpy_iterator()
+        self.tfr_dataset_np = self.tfr_dataset.as_numpy_iterator()
 
 
     def _get_tfrecord_item(self, i):
-        if self.cont_time:
-            X, y, y_idxs = next(self.tfr_dataset)
-            ftime = ((y_idxs * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat), len(self.data.lon))))
-        else:
-            X, y = next(self.tfr_dataset)
-
-        if self.normalize:
-            X = (X - self.mean.values) / self.std.values
-            y = (y - self.mean.values) / self.std.values
-
-        if self.nt_in > 1:
-            # Roll nt_in axis to the second to last position
-            X = np.rollaxis(X, 1, -1)
-            # Then combine the two last axes
-            shape = (*X.shape[:-2], -1)
-            X = X.reshape(shape)
-        y = y[..., self.output_idxs]
-
-        if self.cont_time:
-            X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
+        X, y = next(self.tfr_dataset_np)
         return X, y
 
-    def on_epoch_end(self):
-        'Updates indexes after each epoch'
-        self.idxs = np.arange(self.nt_offset, self.n_samples)
-        if self.shuffle:
-            np.random.shuffle(self.idxs)
-
-    def to_tfrecord(self, savedir):
-        assert self.nt_in == 1, 'nt_in should be zero for TFRecords'
-        years = np.unique(self.data.time.dt.year)
-        months = np.arange(1, 13)
-        for year in tqdm(years):
-            for month in months:
-                time_str = f'{year}-{str(month).zfill(2)}'
-                data_slice = self.data.sel(time=time_str)
-                fn = f'{savedir}/{time_str}.tfrecord'
+    def to_tfr(self, savedir, steps_per_file=250):
+        assert self.batch_size == 1, 'bs must be one'
+        for i, (X, y) in tqdm(enumerate(self)):
+            if i % steps_per_file == 0:
+                c = int(np.floor(i / steps_per_file))
+                fn = f'{savedir}/{str(c).zfill(3)}.tfrecord'
+                print('Writing to file:', fn)
                 writer = tf.io.TFRecordWriter(fn)
-                for t in data_slice.time:
-                    time = str(t.values).encode('utf-8')
-                    data = self.data.sel(time=t).values.astype('float32')
-                    serialized_example = serialize_example(time, data)
-                    writer.write(serialized_example)
+            serialized_example = serialize_example(X[0], y[0])  # Remove batch dimension
+            writer.write(serialized_example)
+            if i + 1 % steps_per_file == 0:
                 writer.close()
+        writer.close()
 
 
 
@@ -408,10 +343,8 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
 
-    if dg.tfrecord_files is None:
-        preds = model.predict(dg, verbose=verbose)
-    else:   # Necessary because my tfr implementation is the biggest mess
-        preds = tfr_predict(model, dg, verbose=verbose)
+    preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
+
 
     preds = xr.DataArray(
         preds[0] if multi_dt else preds,
