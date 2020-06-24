@@ -48,7 +48,7 @@ class DataGenerator(keras.utils.Sequence):
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
                  cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None,
-                 tp_log=None):
+                 tp_log=None, tfr_out=False):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -86,6 +86,7 @@ class DataGenerator(keras.utils.Sequence):
         self.cont_dt = cont_dt
         self.tfr_prefetch = tfr_prefetch
         self.tfr_repeat = tfr_repeat
+        self.tfr_out = tfr_out
         self.y_nt = y_nt
 
         data = []
@@ -168,6 +169,7 @@ class DataGenerator(keras.utils.Sequence):
             self._setup_tfrecord_ds()
         else:
             self.is_tfr = False
+            self.tfr_dataset = None
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
@@ -214,12 +216,14 @@ class DataGenerator(keras.utils.Sequence):
     def _get_item(self, i):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
+
+        if self.min_lead_time is None:
+            min_nt = 1
+        else:
+            min_nt = int(self.min_lead_time / self.dt)
+
         if self.cont_time:
             if not self.fixed_time:
-                if self.min_lead_time is None:
-                    min_nt = 1
-                else:
-                    min_nt = int(self.min_lead_time / self.dt)
                 nt = np.random.randint(min_nt, self.nt + 1, len(idxs))
             else:
                 nt = np.ones(len(idxs), dtype='int') * self.nt
@@ -227,13 +231,17 @@ class DataGenerator(keras.utils.Sequence):
                                                                    len(self.data.lon)))
         else:
             nt = self.nt
+
         X = self.data.isel(time=idxs).values.astype('float32')
+
         if self.multi_dt > 1: consts = X[..., self.const_idxs]
+
         if self.nt_in > 1:
             X = np.concatenate([
                                    self.data.isel(time=idxs - nt_in * self.dt_in).values
                                    for nt_in in range(self.nt_in - 1, 0, -1)
                                ] + [X], axis=-1).astype('float32')
+
         if self.multi_dt > 1:
             X = [X[..., self.not_const_idxs], consts]
             step = self.nt // self.multi_dt
@@ -245,12 +253,23 @@ class DataGenerator(keras.utils.Sequence):
             y = self.y_roll.isel(
                 time=idxs + nt,
             ).values.astype('float32')
+        elif self.tfr_out:
+            assert self.batch_size == 1, 'bs must be one'
+            time_slice = slice(idxs[0]+min_nt, idxs[0]+self.nt+1)
+            y = self.data.isel(time=time_slice, level=self.output_idxs).values.astype('float32')[None]
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
+
         if self.cont_time:
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
         return X, y
 
+    def _decode(self, example_proto):
+        dic = _parse(example_proto)
+        X = tf.io.parse_tensor(dic['X'], np.float32)
+        y = tf.io.parse_tensor(dic['y'], np.float32)
+        y = y[self.nt-1]
+        return X, y
 
     def _setup_tfrecord_ds(self):
         # Find all files to be used
@@ -261,7 +280,7 @@ class DataGenerator(keras.utils.Sequence):
 
         dataset = tf.data.TFRecordDataset(
             tfr_fns, num_parallel_reads=self.tfr_num_parallel_calls
-        ).map(decode)
+        ).map(self._decode)
 
         if self.shuffle:
             dataset = dataset.shuffle(

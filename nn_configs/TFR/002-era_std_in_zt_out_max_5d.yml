@@ -1,0 +1,15 @@
+exp_id: 001-era_std_in_zt_out_3d
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+data_subsample: 1
+norm_subsample: 30000
+nt: 3
+lead_time: 120
+batch_size: 1
+#tfr_out: 1
+
+filters: [1, 1]
+kernels: [1, 1]

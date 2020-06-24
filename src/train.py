@@ -72,7 +72,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_num_parallel_calls=tfr_num_parallel_calls,
             tfr_buffer_size=tfr_buffer_size,
             tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-            min_lead_time=min_lead_time, tp_log=tp_log
+            min_lead_time=min_lead_time, tp_log=tp_log, verbose=1
         )
 
         dg_valid = DataGenerator(

@@ -25,9 +25,9 @@ y_nt: 732  # 30.5 * 24
 discard_first: 24
 
 cmip: 1
-cmip_dir: [/data/stephan/WeatherBench/CMIP/MPI-ESM/5.625deg/]
-train_years: [1850, 1999]
-valid_years: [2000, 2008]
-test_years: [2008, 2014]
+cmip_dir: /data/stephan/WeatherBench/CMIP/MPI-ESM/5.625deg
+train_years: [1850, 2005]
+valid_years: [2006, 2014]
+test_years: [2014, 2014]
 ext_mean: /home/rasp/data/myWeatherBench/predictions_S/saved_models/001-resnet_t2m_3m_mean.nc
 ext_std: /home/rasp/data/myWeatherBench/predictions_S/saved_models/001-resnet_t2m_3m_std.nc

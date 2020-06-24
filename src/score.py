@@ -51,7 +51,7 @@ def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
     return xr.concat(rmses, 'lead_time')
 
 
-def compute_weighted_acc(da_fc, da_true):
+def compute_weighted_acc(da_fc, da_true, centered=True):
     clim = da_true.mean('time')
     t = np.intersect1d(da_fc.time, da_true.time)
     fa = da_fc.sel(time=t) - clim
@@ -61,8 +61,12 @@ def compute_weighted_acc(da_fc, da_true):
     weights_lat /= weights_lat.mean()
     w = weights_lat
     
-    fa_prime = fa - fa.mean()
-    a_prime = a - a.mean()
+    if centered:
+        fa_prime = fa - fa.mean()
+        a_prime = a - a.mean()
+    else:
+        fa_prime = fa
+        a_prime = a
     
     acc = (
         np.sum(w * fa_prime * a_prime) /
