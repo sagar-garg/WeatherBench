@@ -10,6 +10,7 @@ def convert_to_tfr(my_config, savedir='/data/stephan/WeatherBench/TFR', steps_pe
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args['gpu'])
 
     print('Load data generators')
+    if args['cmip']: args['cmip_dir'] = args['cmip_dir'][0]
     dg_train, dg_valid, dg_test = load_data(**args)
 
     savedir = savedir + '/' + args['exp_id']

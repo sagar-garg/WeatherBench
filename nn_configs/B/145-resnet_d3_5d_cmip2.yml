@@ -1,0 +1,38 @@
+exp_id: 145-resnet_d3_5d_cmip2
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 2]
+kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+lead_time: 120
+lr: 0.5e-4
+early_stopping_patience: 10
+reduce_lr_patience: 5
+min_es_delta: 0.0001
+data_subsample: 1
+norm_subsample: 30000
+bn_position: post
+#dropout: 0.1
+l2: 1e-5
+activation: leakyrelu
+nt: 3
+loss: lat_mae
+batch_size: 32
+
+
+cmip: 1
+cmip_dir: /data/stephan/WeatherBench/CMIP/MPI-ESM/5.625deg/
+train_years: [1850, 2005]
+valid_years: [2006, 2014]
+test_years: [2014, 2014]
+
+train_tfr_files: /data/stephan/WeatherBench/TFR/003-MPI-ESM_std/train/*.tfrecord
+valid_tfr_files: /data/stephan/WeatherBench/TFR/003-MPI-ESM_std/valid/*.tfrecord
+test_tfr_files: /data/stephan/WeatherBench/TFR/003-MPI-ESM_std/test/*.tfrecord
+ext_mean: /data/stephan/WeatherBench/TFR/002-era_std/mean.nc
+ext_std: /data/stephan/WeatherBench/TFR/002-era_std/std.nc
+tfr_num_parallel_calls: 20
+tfr_buffer_size: 1000
+#tfr_prefetch: 1

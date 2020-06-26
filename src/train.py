@@ -32,13 +32,14 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
               multi_dt=1, verbose=0,
               train_tfr_files=None, valid_tfr_files=None, test_tfr_files=None, tfr_num_parallel_calls=1,
               tfr_buffer_size=1000, tfr_prefetch=None, y_nt=None, discard_first=None,
-              min_lead_time=None, tp_log=None,
+              min_lead_time=None, tp_log=None, tfr_out=False,
               **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
 
     # Open dataset and create data generators
     if cmip:
+
         # Load vars
         tmp_dict = var_dict.copy()
         constants = tmp_dict.pop('constants')
@@ -72,7 +73,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_num_parallel_calls=tfr_num_parallel_calls,
             tfr_buffer_size=tfr_buffer_size,
             tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-            min_lead_time=min_lead_time, tp_log=tp_log, verbose=1
+            min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out
         )
 
         dg_valid = DataGenerator(
@@ -88,7 +89,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_buffer_size=1,
             tfr_prefetch=None, y_nt=y_nt,
             tfr_repeat=False,
-            min_lead_time=min_lead_time, tp_log=tp_log
+            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out
         )
 
     dg_test = DataGenerator(
@@ -104,7 +105,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         tfr_buffer_size=1,
         tfr_prefetch=None, y_nt=y_nt,
         tfr_repeat=False,
-        min_lead_time=min_lead_time, tp_log=tp_log
+        min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out
     )
     if only_test:
         return dg_test
@@ -123,7 +124,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          parametric, one_cycle, long_skip,
          train_tfr_files, valid_tfr_files, test_tfr_files,
          tfr_num_parallel_calls, tfr_buffer_size,
-         tfr_prefetch, y_nt, discard_first, min_lead_time, relu_idxs, tp_log
+         tfr_prefetch, y_nt, discard_first, min_lead_time, relu_idxs, tp_log,
+         **kwargs
       ):
     print(type(var_dict))
 
@@ -407,6 +409,8 @@ def load_args(my_config=None):
 
     p.add_argument('--relu_idxs', type=int, default=None, nargs='+', help='for tp')
     p.add_argument('--tp_log', type=float, default=None, help='for tp')
+
+    p.add_argument('--tfr_out', type=int, default=0, help='output all times up to lead time')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)

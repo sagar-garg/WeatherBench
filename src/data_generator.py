@@ -88,6 +88,7 @@ class DataGenerator(keras.utils.Sequence):
         self.tfr_repeat = tfr_repeat
         self.tfr_out = tfr_out
         self.y_nt = y_nt
+        self.tfr_max_lead = 120
 
         data = []
         level_names = []
@@ -101,11 +102,14 @@ class DataGenerator(keras.utils.Sequence):
                     level_names.append(var)
             else:
                 var, levels = params
+                da = ds[var]
+                if tp_log and var == 'tp':
+                    da = log_trans(da, tp_log)
                 try:
-                    data.append(ds[var].sel(level=levels))
+                    data.append(da.sel(level=levels))
                     level_names += [f'{var}_{level}' for level in levels]
                 except ValueError:
-                    data.append(ds[var].expand_dims({'level': generic_level}, 1))
+                    data.append(da.expand_dims({'level': generic_level}, 1))
                     level_names.append(var)
 
         self.data = xr.concat(data, 'level').transpose('time', 'lat', 'lon', 'level')
@@ -126,36 +130,38 @@ class DataGenerator(keras.utils.Sequence):
         self.raw_data = self.data
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
 
+        if self.min_lead_time is None:
+            self.min_nt = 1
+        else:
+            self.min_nt = int(self.min_lead_time / self.dt)
+
+        # Normalize
+        if verbose: print('DG normalize', datetime.datetime.now().time())
+        if mean is not None:
+            self.mean = mean
+        else:
+            self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
+                ('time', 'lat', 'lon')).compute()
+            if 'tp' in self.data.level_names:  # set tp mean to zero but not if ext
+                tp_idx = list(self.data.level_names).index('tp')
+                self.mean.values[tp_idx] = 0
+
+        if std is not None:
+            self.std = std
+        else:
+            self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
+                ('time', 'lat', 'lon')).compute()
+        if tp_log is not None:
+            self.mean.attrs['tp_log'] = tp_log
+            self.std.attrs['tp_log'] = tp_log
+        if normalize:
+            self.data = (self.data - self.mean) / self.std
+
         if verbose: print('DG load', datetime.datetime.now().time())
         if load:
             if verbose: print('Loading data into RAM')
             self.data.load()
         if verbose: print('DG done', datetime.datetime.now().time())
-
-        # Apply transforms
-        if tp_log is not None:
-            # pdb.set_trace()
-            tp_idx = list(self.data.level_names).index('tp')
-            self.data.values[..., tp_idx] = log_trans(self.data.values[..., tp_idx], tp_log)
-
-        # Normalize
-        if verbose: print('DG normalize', datetime.datetime.now().time())
-        if mean is not None:
-            assert std is not None, 'Both mean and std have to be given'
-            self.mean = mean; self.std = std
-        else:
-            self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
-                ('time', 'lat', 'lon')).compute()
-            self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
-                ('time', 'lat', 'lon')).compute()
-            if 'tp' in self.data.level_names:  # set tp mean to zero but not if ext
-                tp_idx = list(self.data.level_names).index('tp')
-                self.mean.values[tp_idx] = 0
-                if tp_log is not None:
-                    self.mean.attrs['tp_log'] = tp_log
-                    self.std.attrs['tp_log'] = tp_log
-        if normalize:
-            self.data = (self.data - self.mean) / self.std
 
         self.on_epoch_end()
 
@@ -192,7 +198,10 @@ class DataGenerator(keras.utils.Sequence):
 
     @property
     def init_time(self):
-        return self.data.isel(time=slice(self.nt_offset, -self.nt)).time
+        stop = -self.nt
+        if self.is_tfr:
+            stop += -(self.tfr_max_lead - self.lead_time // self.dt)
+        return self.data.isel(time=slice(self.nt_offset, int(stop))).time
 
     @property
     def valid_time(self):
@@ -201,6 +210,10 @@ class DataGenerator(keras.utils.Sequence):
         if self.multi_dt > 1:
             diff = self.nt - self.nt // self.multi_dt
             start -= diff; stop = -diff
+        if self.is_tfr:
+            stop = -int((self.tfr_max_lead - self.lead_time) // self.dt)
+            if stop == 0:
+                stop = None
         return self.data.isel(time=slice(start, stop)).time
 
     @property
@@ -217,14 +230,9 @@ class DataGenerator(keras.utils.Sequence):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
 
-        if self.min_lead_time is None:
-            min_nt = 1
-        else:
-            min_nt = int(self.min_lead_time / self.dt)
-
         if self.cont_time:
             if not self.fixed_time:
-                nt = np.random.randint(min_nt, self.nt + 1, len(idxs))
+                nt = np.random.randint(self.min_nt, self.nt + 1, len(idxs))
             else:
                 nt = np.ones(len(idxs), dtype='int') * self.nt
             ftime = (nt * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat),
@@ -255,7 +263,7 @@ class DataGenerator(keras.utils.Sequence):
             ).values.astype('float32')
         elif self.tfr_out:
             assert self.batch_size == 1, 'bs must be one'
-            time_slice = slice(idxs[0]+min_nt, idxs[0]+self.nt+1)
+            time_slice = slice(idxs[0]+self.min_nt, idxs[0]+self.nt+1)
             y = self.data.isel(time=time_slice, level=self.output_idxs).values.astype('float32')[None]
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
@@ -264,12 +272,24 @@ class DataGenerator(keras.utils.Sequence):
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
         return X, y
 
+
     def _decode(self, example_proto):
         dic = _parse(example_proto)
         X = tf.io.parse_tensor(dic['X'], np.float32)
         y = tf.io.parse_tensor(dic['y'], np.float32)
-        y = y[self.nt-1]
-        return X, y
+        if self.cont_time:
+            if self.fixed_time:
+                y_idx = self.nt-1
+            else:
+                y_idx = tf.random.uniform((), self.min_nt-1, self.nt, dtype=tf.int32)
+            y_time = (y_idx+1) * self.dt
+            ftime = (y_time / 100) * np.ones((len(self.data.lat), len(self.data.lon), 1))
+            X = tf.concat([X, tf.cast(ftime, tf.float32)], -1)
+            # Append to X
+            return X, y[y_idx]
+        else:
+            y_idx = self.nt-1
+            return X, y[y_idx]
 
     def _setup_tfrecord_ds(self):
         # Find all files to be used
@@ -372,7 +392,6 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
 
     preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
 
-
     preds = xr.DataArray(
         preds[0] if multi_dt else preds,
         dims=['time', 'lat', 'lon', 'level'],
@@ -411,6 +430,7 @@ def create_cont_predictions(model, dg, max_lead_time=120, dt=12, lead_time=None)
     preds = []
     for l in tqdm(lead_time):
         dg.lead_time = l.values; dg.on_epoch_end()
+        if dg.is_tfr: dg._setup_tfrecord_ds()
         p = create_predictions(model, dg)
         p['time'] = dg.init_time
         preds.append(p)
