@@ -237,9 +237,6 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg in self.dgs:
             dg.on_epoch_end()
 
- #Ignore create_predictions() function for now, it is completely wrong. still working on it.
-
-#Check. have to do weird reshaping. Also dont know how to call num_bins since dg_valid doesnt have it.
 def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False,
                        num_bins=50, bin_min=-5, bin_max=5, member=None):
     """Create non-iterative predictions"""
