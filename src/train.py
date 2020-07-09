@@ -31,8 +31,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
               nt_in, dt_in, only_test=False, ext_mean=None, ext_std=None, cont_time=False,
               multi_dt=1, verbose=0,
               train_tfr_files=None, valid_tfr_files=None, test_tfr_files=None, tfr_num_parallel_calls=1,
-              tfr_buffer_size=1000, tfr_prefetch=None, y_nt=None, discard_first=None,
-              min_lead_time=None, tp_log=None, tfr_out=False,
+              tfr_buffer_size=1000, tfr_prefetch=None, y_roll=None, X_roll=None, discard_first=None,
+              min_lead_time=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
               **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
@@ -72,8 +72,9 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfrecord_files=train_tfr_files,
             tfr_num_parallel_calls=tfr_num_parallel_calls,
             tfr_buffer_size=tfr_buffer_size,
-            tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-            min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out
+            tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
+            min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out,
+            tfr_out_idxs=tfr_out_idxs
         )
 
         dg_valid = DataGenerator(
@@ -87,9 +88,10 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfrecord_files=valid_tfr_files,
             tfr_num_parallel_calls=1,
             tfr_buffer_size=1,
-            tfr_prefetch=None, y_nt=y_nt,
+            tfr_prefetch=None, y_roll=y_roll, X_roll=X_roll,
             tfr_repeat=False,
-            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out
+            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
+            tfr_out_idxs=tfr_out_idxs
         )
 
     dg_test = DataGenerator(
@@ -103,9 +105,10 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         tfrecord_files=test_tfr_files,
         tfr_num_parallel_calls=1,
         tfr_buffer_size=1,
-        tfr_prefetch=None, y_nt=y_nt,
+        tfr_prefetch=None, y_roll=y_roll, X_roll=X_roll,
         tfr_repeat=False,
-        min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out
+        min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
+        tfr_out_idxs=tfr_out_idxs
     )
     if only_test:
         return dg_test
@@ -124,7 +127,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          parametric, one_cycle, long_skip,
          train_tfr_files, valid_tfr_files, test_tfr_files,
          tfr_num_parallel_calls, tfr_buffer_size,
-         tfr_prefetch, y_nt, discard_first, min_lead_time, relu_idxs, tp_log,
+         tfr_prefetch, y_roll, X_roll, discard_first, min_lead_time, relu_idxs, tp_log, tfr_out_idxs,
          **kwargs
       ):
     print(type(var_dict))
@@ -155,8 +158,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                     test_tfr_files=test_tfr_files,
                     tfr_num_parallel_calls=tfr_num_parallel_calls,
                     tfr_buffer_size=tfr_buffer_size,
-                    tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-                    min_lead_time=min_lead_time, tp_log=tp_log
+                    tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
+                    min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -171,8 +174,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 test_tfr_files=test_tfr_files,
                 tfr_num_parallel_calls=tfr_num_parallel_calls,
                 tfr_buffer_size=tfr_buffer_size,
-                tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-                min_lead_time=min_lead_time, tp_log=tp_log
+                tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
+                min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
@@ -184,14 +187,19 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             test_tfr_files=test_tfr_files,
             tfr_num_parallel_calls=tfr_num_parallel_calls,
             tfr_buffer_size=tfr_buffer_size,
-            tfr_prefetch=tfr_prefetch, y_nt=y_nt, discard_first=discard_first,
-            min_lead_time=min_lead_time, tp_log=tp_log
+            tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
+            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
         )
 
     # Build model
     if pretrained_model is not None:
         pretrained_model = keras.models.load_model(
-            pretrained_model, custom_objects={'PeriodicConv2D': PeriodicConv2D, 'lat_mse': keras.losses.mse}
+            pretrained_model, custom_objects={
+                'PeriodicConv2D': PeriodicConv2D,
+                'ChannelReLU2D': ChannelReLU2D,
+                'lat_mse': keras.losses.mse,
+                'lat_mae': keras.losses.mse
+            }
         )
 
     with mirrored_strategy.scope():
@@ -312,26 +320,19 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
         valdir = datadir
     else:
         valdir = '/'.join(datadir.split('/')[:-2] + ['5.625deg/'])
-    if cmip:
-        z500_valid = load_test_data(
-            f'{valdir}geopotential', 'z', years=slice(test_years[0], test_years[1]))
-        t850_valid = load_test_data(
-            f'{valdir}temperature', 't', years=slice(test_years[0], test_years[1]))
-    else:
-        z500_valid = load_test_data(f'{valdir}geopotential_500', 'z')
-        t850_valid = load_test_data(f'{valdir}temperature_850', 't')
-    try:
-        print(compute_weighted_rmse(
-            preds.z.sel(level=500) if hasattr(preds, 'level') else preds.z, z500_valid
-        ).load())
-    except:
-        print('Z500 not found in predictions.')
-    try:
-        print(compute_weighted_rmse(
-            preds.t.sel(level=850) if hasattr(preds, 'level') else preds.t, t850_valid
-        ).load())
-    except:
-        print('T850 not found in predictions.')
+
+    z500_valid = load_test_data(f'{valdir}geopotential_500', 'z', years=slice(test_years[0], test_years[1])).drop('level')
+    t850_valid = load_test_data(f'{valdir}temperature_850', 't', years=slice(test_years[0], test_years[1])).drop('level')
+    tp = xr.open_mfdataset(f'{valdir}/6hr_precipitation/*.nc', combine='by_coords').sel(
+        time=slice(test_years[0], test_years[1]))
+    t2m = xr.open_mfdataset(f'{valdir}/2m_temperature/*.nc', combine='by_coords').sel(
+        time=slice(test_years[0], test_years[1]))
+    valid = xr.merge([z500_valid, t850_valid, tp, t2m])
+
+    print(compute_weighted_rmse(
+        preds, valid
+    ).load())
+
 
 
 def load_args(my_config=None):
@@ -404,13 +405,15 @@ def load_args(my_config=None):
     p.add_argument('--tfr_prefetch', type=int, default=None, help='')
 
     p.add_argument('--min_lead_time', type=int, default=None, help='for cont.')
-    p.add_argument('--y_nt', type=int, default=None, help='In hours.')
+    p.add_argument('--y_roll', type=int, default=None, help='In hours.')
+    p.add_argument('--X_roll', type=int, default=None, help='In hours.')
     p.add_argument('--discard_first', type=int, default=None, help='Discard first x time steps in train generator')
 
     p.add_argument('--relu_idxs', type=int, default=None, nargs='+', help='for tp')
     p.add_argument('--tp_log', type=float, default=None, help='for tp')
 
     p.add_argument('--tfr_out', type=int, default=0, help='output all times up to lead time')
+    p.add_argument('--tfr_out_idxs', type=int, default=None, nargs='+', help='out idxs')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)

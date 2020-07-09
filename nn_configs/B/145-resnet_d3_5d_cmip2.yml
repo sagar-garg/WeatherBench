@@ -33,6 +33,6 @@ valid_tfr_files: /data/stephan/WeatherBench/TFR/003-MPI-ESM_std/valid/*.tfrecord
 test_tfr_files: /data/stephan/WeatherBench/TFR/003-MPI-ESM_std/test/*.tfrecord
 ext_mean: /data/stephan/WeatherBench/TFR/002-era_std/mean.nc
 ext_std: /data/stephan/WeatherBench/TFR/002-era_std/std.nc
-tfr_num_parallel_calls: 20
+tfr_num_parallel_calls: 5
 tfr_buffer_size: 1000
 #tfr_prefetch: 1

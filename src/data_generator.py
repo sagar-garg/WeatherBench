@@ -47,8 +47,8 @@ class DataGenerator(keras.utils.Sequence):
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
-                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_nt=None, discard_first=None,
-                 tp_log=None, tfr_out=False):
+                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_roll=None, X_roll=None,
+                 discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -74,7 +74,6 @@ class DataGenerator(keras.utils.Sequence):
         self.lead_time = lead_time
         self.nt_in = nt_in
         self.dt_in = dt_in
-        self.nt_offset = (nt_in - 1) * dt_in
         self.cont_time = cont_time
         self.min_lead_time = min_lead_time
         self.fixed_time = fixed_time
@@ -87,8 +86,10 @@ class DataGenerator(keras.utils.Sequence):
         self.tfr_prefetch = tfr_prefetch
         self.tfr_repeat = tfr_repeat
         self.tfr_out = tfr_out
-        self.y_nt = y_nt
+        self.y_roll = y_roll
+        self.X_roll = X_roll
         self.tfr_max_lead = 120
+        self.tfr_out_idxs = tfr_out_idxs
 
         data = []
         level_names = []
@@ -129,6 +130,8 @@ class DataGenerator(keras.utils.Sequence):
         self.data = self.data.isel(time=slice(0, None, data_subsample))
         self.raw_data = self.data
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
+        self.dt_in = int(self.dt_in // self.dt)
+        self.nt_offset = (nt_in - 1) * self.dt_in
 
         if self.min_lead_time is None:
             self.min_nt = 1
@@ -163,12 +166,17 @@ class DataGenerator(keras.utils.Sequence):
             self.data.load()
         if verbose: print('DG done', datetime.datetime.now().time())
 
+        if self.X_roll is not None:
+            self.X_roll = int(self.X_roll // self.dt)
+            self.X_rolled = self.data.rolling(time=self.X_roll).mean()
+            self.nt_offset += self.X_roll
+
         self.on_epoch_end()
 
-        if self.y_nt is not None:
-            self.y_nt = int(self.y_nt // self.dt)
-            assert self.y_nt < self.nt, 'nt must be larger than y_nt'
-            self.y_roll = self.data.isel(level=self.output_idxs).rolling(time=self.y_nt).mean()
+        if self.y_roll is not None:
+            self.y_roll = int(self.y_roll // self.dt)
+            assert self.y_roll < self.nt, 'nt must be larger than y_roll'
+            self.y_rolled = self.data.isel(level=self.output_idxs).rolling(time=self.y_roll).mean()
 
         if self.tfrecord_files is not None:
             self.is_tfr = True
@@ -189,7 +197,12 @@ class DataGenerator(keras.utils.Sequence):
     
     @property
     def shape(self):
-        return len(self.data.lat), len(self.data.lon), len(self.data.level) * self.nt_in + self.cont_time
+        return (
+            len(self.data.lat),
+            len(self.data.lon),
+            len(self.data.level.isel(level=self.not_const_idxs)) * self.nt_in + len(self.data.level.isel(
+                level=self.const_idxs)) + self.cont_time
+        )
 
     @property
     def nt(self):
@@ -222,7 +235,11 @@ class DataGenerator(keras.utils.Sequence):
 
     def __getitem__(self, i):
         if self.tfrecord_files is None:
-            return self._get_item(i)
+            if hasattr(self, 'cheat'):
+                X, y = self._get_item(i)
+                return X, y[-1]
+            else:
+                return self._get_item(i)
         else:
             return self._get_tfrecord_item(i)
 
@@ -240,13 +257,18 @@ class DataGenerator(keras.utils.Sequence):
         else:
             nt = self.nt
 
-        X = self.data.isel(time=idxs).values.astype('float32')
+        if self.X_roll is not None:
+            X_data = self.X_rolled
+        else:
+            X_data = self.data
+
+        X = X_data.isel(time=idxs).values.astype('float32')
 
         if self.multi_dt > 1: consts = X[..., self.const_idxs]
 
         if self.nt_in > 1:
             X = np.concatenate([
-                                   self.data.isel(time=idxs - nt_in * self.dt_in).values
+                                   X_data.isel(time=idxs - nt_in * self.dt_in).values[..., self.not_const_idxs]
                                    for nt_in in range(self.nt_in - 1, 0, -1)
                                ] + [X], axis=-1).astype('float32')
 
@@ -257,8 +279,8 @@ class DataGenerator(keras.utils.Sequence):
                 self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
                 for nt in np.arange(step, self.nt + step, step)
             ]
-        elif self.y_nt is not None:
-            y = self.y_roll.isel(
+        elif self.y_roll is not None:
+            y = self.y_rolled.isel(
                 time=idxs + nt,
             ).values.astype('float32')
         elif self.tfr_out:
@@ -277,6 +299,8 @@ class DataGenerator(keras.utils.Sequence):
         dic = _parse(example_proto)
         X = tf.io.parse_tensor(dic['X'], np.float32)
         y = tf.io.parse_tensor(dic['y'], np.float32)
+        if self.tfr_out_idxs is not None:
+            y = tf.gather(y, self.tfr_out_idxs, axis=-1)
         if self.cont_time:
             if self.fixed_time:
                 y_idx = self.nt-1
@@ -285,7 +309,6 @@ class DataGenerator(keras.utils.Sequence):
             y_time = (y_idx+1) * self.dt
             ftime = (y_time / 100) * np.ones((len(self.data.lat), len(self.data.lon), 1))
             X = tf.concat([X, tf.cast(ftime, tf.float32)], -1)
-            # Append to X
             return X, y[y_idx]
         else:
             y_idx = self.nt-1
@@ -408,16 +431,16 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
         std = np.concatenate([std]*2)
     preds = preds * std + mean
 
+    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
+
     # Reverse tranforms
-    if hasattr(dg.mean, 'tp_log'):
+    if hasattr(dg.mean, 'tp_log') and 'tp' in unique_vars:
         tp_idx = list(preds.level_names).index('tp')
         preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
 
-    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
-
     das = []
     for v in unique_vars:
-        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] in v]
+        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] == v]
         da = preds.isel(level=idxs).squeeze().drop('level_names')
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})

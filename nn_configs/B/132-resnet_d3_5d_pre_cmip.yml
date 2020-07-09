@@ -1,4 +1,4 @@
-exp_id: 132-resnet_d3_5d_pre_cmip
+exp_id: 132-resnet_d3_35_pre_cmip
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions/

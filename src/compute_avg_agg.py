@@ -1,6 +1,10 @@
 from .utils import *
 import xarray as xr
 from fire import Fire
+"""
+2m_temperature_daily
+python -m src.compute_avg_agg /data/stephan/WeatherBench/CMIP/MPI-ESM_r2/5.625deg/2m_temperature/ /data/stephan/WeatherBench/CMIP/MPI-ESM_r2/5.625deg/2m_temperature_daily/2m_temperature_daily_ _5.625deg.nc 24 --save_years 5
+"""
 
 def compute_avg_agg(datadir, savepref, savesuf, a_hours=24, method='avg', save_years=1, rename=None, center=False):
     ds_in = xr.open_mfdataset(f'{datadir}/*.nc', combine='by_coords')

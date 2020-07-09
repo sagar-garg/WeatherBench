@@ -1,18 +1,17 @@
-exp_id: 004-resnet_t2m_3m_overfit
+exp_id: 005-resnet_t2m_3m_small
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions_S/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions_S/
 var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), '2m_temperature_daily': ('t2m', None), 'constants': ['lsm','orography','lat2d']}
 output_vars: [t2m]
-filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
-kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+filters: [16, 16, 16, 16, 16, 16, 16, 16, 16, 1]
+kernels: [7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
 lead_time: 2928  # 30.5*24*4
 lr: 0.5e-4
-#early_stopping_patience: 20
-#reduce_lr_patience: 10
-#min_lr_times: 2
+early_stopping_patience: 20
+reduce_lr_patience: 10
+min_lr_times: 2
 #min_es_delta: 0.0001
-epochs: 500
 data_subsample: 24
 norm_subsample: 5000
 bn_position: post
@@ -20,7 +19,9 @@ dropout: 0.1
 l2: 1e-5
 activation: leakyrelu
 nt: 3
+dt: 732  # 30.5 * 24
 loss: lat_mse
 batch_size: 32
-y_nt: 732  # 30.5 * 24
+y_roll: 732  # 30.5 * 24
+X_roll: 732  # 30.5 * 24
 discard_first: 24
