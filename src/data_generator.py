@@ -13,7 +13,7 @@ class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
-                 min_lead_time=None, las_kernel=None, las_gauss_std=None, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5):
+                 min_lead_time=None, las_kernel=None, las_gauss_std=None, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5,is_doi=False, adaptive_bins=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -48,6 +48,8 @@ class DataGenerator(keras.utils.Sequence):
         self.num_bins = num_bins
         self.bin_min= bin_min
         self.bin_max= bin_max
+        self.is_doi=is_doi
+        self.adaptive_bins=adaptive_bins
 
         data = []
         level_names = []
@@ -185,12 +187,23 @@ class DataGenerator(keras.utils.Sequence):
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
         
         if self.is_categorical==True:
-            bins=np.linspace(self.bin_min,self.bin_max,self.num_bins+1)
-            bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
+            if self.is_doi:
+                y=y-X[...,self.output_idxs]#Difference of Input
+            
+            if self.adaptive_bins is None:
+                bins=np.linspace(self.bin_min,self.bin_max,self.num_bins+1)
+                bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
+                
+            else:
+                bins=self.adaptive_bins
+                bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
+                
+            
             y_shape=y.shape
             y=pd.cut(y.reshape(-1), bins, labels=False).reshape(y_shape)
             y=np_utils.to_categorical(y, num_classes=self.num_bins)
-       
+                
+              
         return X, y
 
     def on_epoch_end(self):
@@ -237,8 +250,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg in self.dgs:
             dg.on_epoch_end()
 
-def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False,
-                       num_bins=50, bin_min=-5, bin_max=5, member=None):
+def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5, member=None, is_doi=False, adaptive_bins=None):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
@@ -259,7 +271,7 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
     if is_categorical:
         preds=model.predict(dg)[0] if multi_dt else model.predict(dg)
 
-        if member is not None:   # Create emsemble forecast
+        if member is not None:   # Create emsemble forecast.
             interval=(bin_max-bin_min)/num_bins
             bin_mids=np.linspace(bin_min+0.5*interval, bin_max-0.5*interval, num_bins)
 
@@ -283,10 +295,21 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
                     np.arange(member),'level': level,'level_names': level_names,},
             )
         else:   # Return binned predictions
-            bins = np.linspace(bin_min, bin_max, num_bins+1)
+            
             mean = dg.mean.isel(level=dg.output_idxs).values
             std = dg.std.isel(level=dg.output_idxs).values
-            unnormalized_bins = bins * std[:, None] + mean[:, None]
+            
+            if adaptive_bins is None:
+                bins = np.linspace(bin_min, bin_max, num_bins+1)
+            else:
+                bins=adaptive_bins
+            
+            if is_doi:#for difference of inputs method
+                unnormalized_bins = bins * std[:, None]
+            else:
+                unnormalized_bins = bins * std[:, None] + mean[:, None] 
+                          
+            
             level_names = dg.data.isel(level=dg.output_idxs).level_names
             level = dg.data.isel(level=dg.output_idxs).level
             preds = xr.DataArray(

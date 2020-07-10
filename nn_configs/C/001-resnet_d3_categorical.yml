@@ -19,5 +19,5 @@ l2: 1e-5
 activation: leakyrelu
 nt: 3
 loss: lat_categorical_loss
-is categorical: 1
+is_categorical: 1
 batch_size: 32
