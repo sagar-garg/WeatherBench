@@ -5,6 +5,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 import datetime
 from src.utils import *
+import pandas as pd
 import pdb
 import logging
 from tqdm import tqdm
@@ -49,7 +50,8 @@ class DataGenerator(keras.utils.Sequence):
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
                  cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_roll=None, X_roll=None,
                  discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
-                 old_const=False):
+                 old_const=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5,
+                 predict_difference=False, adaptive_bins=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -92,6 +94,14 @@ class DataGenerator(keras.utils.Sequence):
         self.tfr_max_lead = 120
         self.tfr_out_idxs = tfr_out_idxs
         self.old_const = old_const
+        self.is_categorical = is_categorical
+        self.num_bins = num_bins
+        self.bin_min = bin_min
+        self.bin_max = bin_max
+        self.predict_difference = predict_difference
+        if self.predict_difference:
+            assert self.tfrecord_files is None, 'difference does not work for tfr'
+        self.adaptive_bins = adaptive_bins
 
         data = []
         level_names = []
@@ -186,6 +196,10 @@ class DataGenerator(keras.utils.Sequence):
         else:
             self.is_tfr = False
             self.tfr_dataset = None
+
+        if self.is_categorical:
+            self.bins = np.linspace(self.bin_min, self.bin_max, self.num_bins+1)
+            self.bins[0] = -np.inf; self.bins[-1] = np.inf  # for rare out-of-bound cases.
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
@@ -295,8 +309,18 @@ class DataGenerator(keras.utils.Sequence):
             assert self.batch_size == 1, 'bs must be one'
             time_slice = slice(idxs[0]+self.min_nt, idxs[0]+self.nt+1)
             y = self.data.isel(time=time_slice, level=self.output_idxs).values.astype('float32')[None]
+        elif self.predict_difference:
+            y = (
+                self.data.isel(time=idxs + nt, level=self.output_idxs).values -
+                self.data.isel(time=idxs, level=self.output_idxs).values
+            ).astype('float32')
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
+
+        if self.is_categorical:
+            y_shape = y.shape
+            y = pd.cut(y.reshape(-1), self.bins, labels=False).reshape(y_shape)
+            y = tf.keras.utils.to_categorical(y, num_classes=self.num_bins)
 
         if self.cont_time:
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')

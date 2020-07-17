@@ -33,6 +33,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
               train_tfr_files=None, valid_tfr_files=None, test_tfr_files=None, tfr_num_parallel_calls=1,
               tfr_buffer_size=1000, tfr_prefetch=None, y_roll=None, X_roll=None, discard_first=None,
               min_lead_time=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
+              predict_difference=False, is_categorical=False, bin_min=None, bin_max=None,
+              num_bins=None,
               **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
     if type(ext_std) is str: ext_std = xr.open_dataarray(ext_std)
@@ -74,7 +76,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_buffer_size=tfr_buffer_size,
             tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
             min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out,
-            tfr_out_idxs=tfr_out_idxs
+            tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
         )
 
         dg_valid = DataGenerator(
@@ -91,7 +94,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_prefetch=None, y_roll=y_roll, X_roll=X_roll,
             tfr_repeat=False,
             min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
-            tfr_out_idxs=tfr_out_idxs
+            tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
         )
 
     dg_test = DataGenerator(
@@ -108,7 +112,8 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         tfr_prefetch=None, y_roll=y_roll, X_roll=X_roll,
         tfr_repeat=False,
         min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
-        tfr_out_idxs=tfr_out_idxs
+        tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
+        is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
     )
     if only_test:
         return dg_test
@@ -128,6 +133,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
          train_tfr_files, valid_tfr_files, test_tfr_files,
          tfr_num_parallel_calls, tfr_buffer_size,
          tfr_prefetch, y_roll, X_roll, discard_first, min_lead_time, relu_idxs, tp_log, tfr_out_idxs,
+         predict_difference, is_categorical, bin_min, bin_max, num_bins,
          **kwargs
       ):
     print(type(var_dict))
@@ -159,7 +165,9 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                     tfr_num_parallel_calls=tfr_num_parallel_calls,
                     tfr_buffer_size=tfr_buffer_size,
                     tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
-                    min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
+                    min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
+                    predict_difference=predict_difference,
+                    is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -175,7 +183,9 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 tfr_num_parallel_calls=tfr_num_parallel_calls,
                 tfr_buffer_size=tfr_buffer_size,
                 tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
-                min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
+                min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
+                predict_difference=predict_difference,
+                is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
@@ -188,7 +198,9 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             tfr_num_parallel_calls=tfr_num_parallel_calls,
             tfr_buffer_size=tfr_buffer_size,
             tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
-            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs
+            min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
+            predict_difference=predict_difference,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
         )
 
     # Build model
@@ -208,7 +220,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 filters, kernels, input_shape=dg_train.shape,
                 bn_position=bn_position, use_bias=use_bias, l2=l2, skip=skip,
                 dropout=dropout, activation=activation, long_skip=long_skip,
-                relu_idxs=relu_idxs
+                relu_idxs=relu_idxs, categorical=is_categorical, nvars=len(dg_train.output_idxs)
             )
         elif network_type == 'uresnet':
             model = build_uresnet(
@@ -246,6 +258,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             loss = create_lat_crps_mae(dg_train.data.lat, len(dg_train.output_idxs))
         if loss == 'lat_log_loss':
             loss = create_lat_log_loss(dg_train.data.lat, len(dg_train.output_idxs))
+        if loss == 'lat_categorical_crossentropy':
+            loss = create_lat_categorical_loss(dg_train.data.lat, len(dg_train.output_idxs))
         if optimizer == 'adam':
             opt = keras.optimizers.Adam(lr)
         elif optimizer =='adadelta':
@@ -414,6 +428,12 @@ def load_args(my_config=None):
 
     p.add_argument('--tfr_out', type=int, default=0, help='output all times up to lead time')
     p.add_argument('--tfr_out_idxs', type=int, default=None, nargs='+', help='out idxs')
+
+    p.add_argument('--predict_difference', type=int, default=0, help='')
+    p.add_argument('--is_categorical', type=int, default=0, help='')
+    p.add_argument('--bin_min', type=float, default=None, help='')
+    p.add_argument('--bin_max', type=float, default=None, help='')
+    p.add_argument('--num_bins', type=int, default=None, help='')
 
     args = p.parse_args() if my_config is None else p.parse_args(args=[])
     args.var_dict = ast.literal_eval(args.var_dict)

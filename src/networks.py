@@ -181,6 +181,7 @@ def build_uresnet(filters, kernels, unres, input_shape, bn_position=None, use_bi
 
 def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True, l2=0,
                  skip=True, dropout=0, activation='relu', long_skip=False, relu_idxs=None,
+                 categorical=False, nvars=None,
                  **kwargs):
     x = input = Input(shape=input_shape)
 
@@ -204,6 +205,13 @@ def build_resnet(filters, kernels, input_shape, bn_position=None, use_bias=True,
     )(x)
     if not relu_idxs is None:
         output = ChannelReLU2D(relu_idxs)(output)
+    if categorical:
+        bins = int(filters[-1] / nvars)
+        outputs = []
+        for i in range(nvars):
+            o = Softmax()(output[..., i*bins:(i+1)*bins])
+            outputs.append(o)
+        output = tf.stack(outputs, axis=3)
     output = Activation('linear', dtype='float32')(output)
     return keras.models.Model(input, output)
 
@@ -369,7 +377,17 @@ def create_lat_log_loss(lat, n_vars):
 
     return log_loss
 
+def create_lat_categorical_loss(lat, n_vars):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
 
+    def categorical_loss(y_true, y_pred):
+        cce = tf.keras.losses.categorical_crossentropy
+        loss = 0
+        for i in range(n_vars):
+            loss += cce(y_true[:,:,:,i,:], y_pred[:,:,:,i,:])*weights_lat[None, :, None]
+        return loss
+    return categorical_loss
 
 
 # Agrawal et al version
