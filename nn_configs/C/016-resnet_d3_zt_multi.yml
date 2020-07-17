@@ -6,7 +6,7 @@ var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperatu
 output_vars: [z_*, t_*, u_*, v_*, q_*]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 35]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 6
+lead_time: 12
 lr: 0.5e-4
 early_stopping_patience: 5
 reduce_lr_patience: 2
@@ -19,6 +19,7 @@ l2: 1e-5
 activation: leakyrelu
 #nt: 3
 #dt: 6
+multi_dt: 2
 loss: lat_mse
 batch_size: 32
 #relu_idxs: 3

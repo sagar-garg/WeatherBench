@@ -48,7 +48,8 @@ class DataGenerator(keras.utils.Sequence):
                  min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
                  tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
                  cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_roll=None, X_roll=None,
-                 discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None):
+                 discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
+                 old_const=False):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -90,6 +91,7 @@ class DataGenerator(keras.utils.Sequence):
         self.X_roll = X_roll
         self.tfr_max_lead = 120
         self.tfr_out_idxs = tfr_out_idxs
+        self.old_const = old_const
 
         data = []
         level_names = []
@@ -267,10 +269,16 @@ class DataGenerator(keras.utils.Sequence):
         if self.multi_dt > 1: consts = X[..., self.const_idxs]
 
         if self.nt_in > 1:
-            X = np.concatenate([
-                                   X_data.isel(time=idxs - nt_in * self.dt_in).values[..., self.not_const_idxs]
-                                   for nt_in in range(self.nt_in - 1, 0, -1)
-                               ] + [X], axis=-1).astype('float32')
+            if self.old_const:
+                X = np.concatenate([
+                                       self.data.isel(time=idxs - nt_in * self.dt_in).values
+                                       for nt_in in range(self.nt_in - 1, 0, -1)
+                                   ] + [X], axis=-1).astype('float32')
+            else:
+                X = np.concatenate([
+                                       X_data.isel(time=idxs - nt_in * self.dt_in).values[..., self.not_const_idxs]
+                                       for nt_in in range(self.nt_in - 1, 0, -1)
+                                   ] + [X], axis=-1).astype('float32')
 
         if self.multi_dt > 1:
             X = [X[..., self.not_const_idxs], consts]
@@ -373,6 +381,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg, bs in zip(dgs, self.bss): dg.batch_size = int(bs)
         self.mean = self.dgs[0].mean
         self.std = self.dgs[0].std
+        self.tfr_dataset = self.dgs[0].tfr_dataset
 
     @property
     def shape (self):
