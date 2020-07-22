@@ -1,4 +1,4 @@
-name: weatherbench_2
+name: weatherbench_3
 channels:
   - conda-forge
 dependencies:
@@ -12,8 +12,8 @@ dependencies:
   - matplotlib
   - seaborn
   - configargparse
-  - tensorflow-gpu=2.2
   - notebook
   - xskillscore
   - pip:
       - cdsapi
+      - tensorflow-gpu

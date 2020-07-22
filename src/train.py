@@ -57,7 +57,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
     ds_train = ds.sel(time=slice(*train_years))
     ds_valid = ds.sel(time=slice(*valid_years))
     ds_test = ds.sel(time=slice(*test_years))
-
+    
     if not only_test:
         dg_train = DataGenerator(
             ds_train, var_dict, lead_time, batch_size=batch_size, output_vars=output_vars,
