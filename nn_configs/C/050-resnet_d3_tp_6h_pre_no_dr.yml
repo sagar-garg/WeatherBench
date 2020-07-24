@@ -1,4 +1,4 @@
-exp_id: 019-resnet_d3_tp_3d_pre
+exp_id: 050-resnet_d3_tp_6h_pre_no_dr
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions_C/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions_C/
@@ -6,7 +6,7 @@ var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperatu
 output_vars: [tp]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 72
+lead_time: 6
 lr: 0.5e-6
 early_stopping_patience: 5
 reduce_lr_patience: 2
@@ -14,7 +14,7 @@ min_es_delta: 0.0001
 data_subsample: 1
 norm_subsample: 30000
 bn_position: post
-dropout: 0.1
+#dropout: 0.1
 l2: 1e-5
 activation: leakyrelu
 nt: 3
@@ -26,7 +26,7 @@ tp_log: 0.001
 discard_first: 24
 tfr_out_idxs: [3]
 
-pretrained_model: /home/rasp/data/myWeatherBench/predictions_C/saved_models/018-resnet_d3_tp_3d_cmip.h5
+pretrained_model: /home/rasp/data/myWeatherBench/predictions_C/saved_models/049-resnet_d3_tp_6h_cmip_no_dr.h5
 
 train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord
 valid_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/valid/*.tfrecord

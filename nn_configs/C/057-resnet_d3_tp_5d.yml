@@ -1,4 +1,4 @@
-exp_id: 019-resnet_d3_tp_3d_pre
+exp_id: 057-resnet_d3_tp_5d
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions_C/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions_C/
@@ -6,8 +6,8 @@ var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperatu
 output_vars: [tp]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 72
-lr: 0.5e-6
+lead_time: 120
+lr: 0.5e-4
 early_stopping_patience: 5
 reduce_lr_patience: 2
 min_es_delta: 0.0001
@@ -25,13 +25,11 @@ relu_idxs: 0
 tp_log: 0.001
 discard_first: 24
 tfr_out_idxs: [3]
-
-pretrained_model: /home/rasp/data/myWeatherBench/predictions_C/saved_models/018-resnet_d3_tp_3d_cmip.h5
-
-train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord
-valid_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/valid/*.tfrecord
-test_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/test/*.tfrecord
-ext_mean: /data/stephan/WeatherBench/TFR/004-era_all/mean.nc
-ext_std: /data/stephan/WeatherBench/TFR/004-era_all/std.nc
-tfr_num_parallel_calls: 5
-tfr_buffer_size: 1000
+#
+#train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord
+#valid_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/valid/*.tfrecord
+#test_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/test/*.tfrecord
+#ext_mean: /data/stephan/WeatherBench/TFR/004-era_all/mean.nc
+#ext_std: /data/stephan/WeatherBench/TFR/004-era_all/std.nc
+#tfr_num_parallel_calls: 5
+#tfr_buffer_size: 1000

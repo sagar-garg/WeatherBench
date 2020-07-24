@@ -429,7 +429,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
             dg.on_epoch_end()
 
 
-def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
+def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0, no_mean=False):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
@@ -457,7 +457,7 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0):
                 },
     )
     # Unnormalize
-    mean = dg.mean.isel(level=dg.output_idxs).values
+    mean = dg.mean.isel(level=dg.output_idxs).values if not no_mean else 0
     std = dg.std.isel(level=dg.output_idxs).values
     if parametric:
         mean = np.concatenate([mean, np.zeros_like(mean)])

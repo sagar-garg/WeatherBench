@@ -1,13 +1,13 @@
-exp_id: 019-resnet_d3_tp_3d_pre
+exp_id: 029-resnet_d3_ztt_1d
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions_C/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions_C/
 var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'toa_incident_solar_radiation': ('tisr', None), '2m_temperature': ('t2m', None), '6hr_precipitation': ('tp', None), 'constants': ['lsm','orography','lat2d']}
-output_vars: [tp]
-filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
+output_vars: [z_500, t_850, t2m]
+filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 3]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 72
-lr: 0.5e-6
+lead_time: 24
+lr: 0.5e-4
 early_stopping_patience: 5
 reduce_lr_patience: 2
 min_es_delta: 0.0001
@@ -21,17 +21,15 @@ nt: 3
 dt: 6
 loss: lat_mse
 batch_size: 32
-relu_idxs: 0
+#relu_idxs: 3
 tp_log: 0.001
 discard_first: 24
-tfr_out_idxs: [3]
-
-pretrained_model: /home/rasp/data/myWeatherBench/predictions_C/saved_models/018-resnet_d3_tp_3d_cmip.h5
-
-train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord
-valid_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/valid/*.tfrecord
-test_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/test/*.tfrecord
-ext_mean: /data/stephan/WeatherBench/TFR/004-era_all/mean.nc
-ext_std: /data/stephan/WeatherBench/TFR/004-era_all/std.nc
-tfr_num_parallel_calls: 5
-tfr_buffer_size: 1000
+tfr_out_idxs: [0, 1, 2]
+#
+#train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord
+#valid_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/valid/*.tfrecord
+#test_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/test/*.tfrecord
+#ext_mean: /data/stephan/WeatherBench/TFR/004-era_all/mean.nc
+#ext_std: /data/stephan/WeatherBench/TFR/004-era_all/std.nc
+#tfr_num_parallel_calls: 5
+#tfr_buffer_size: 1000

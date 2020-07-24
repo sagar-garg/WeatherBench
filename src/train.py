@@ -77,7 +77,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
             min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out,
             tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
         )
 
         dg_valid = DataGenerator(
@@ -95,7 +95,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_repeat=False,
             min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
             tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
         )
 
     dg_test = DataGenerator(
@@ -113,7 +113,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         tfr_repeat=False,
         min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
         tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-        is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+        is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
     )
     if only_test:
         return dg_test
@@ -167,7 +167,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                     tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
                     min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
                     predict_difference=predict_difference,
-                    is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+                    is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
                 )
                 dg_train.append(dgtr); dg_valid.append(dgv); dg_test.append(dgte)
             dg_train, dg_valid, dg_test = [
@@ -185,7 +185,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
                 tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
                 min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
                 predict_difference=predict_difference,
-                is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+                is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
             )
     else:
         dg_train, dg_valid, dg_test = load_data(
@@ -200,7 +200,7 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
             min_lead_time=min_lead_time, tp_log=tp_log, tfr_out_idxs=tfr_out_idxs,
             predict_difference=predict_difference,
-            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_min, num_bins=num_bins,
+            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins,
         )
 
     # Build model
@@ -328,24 +328,23 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
 
     # Print score in real units
 
-    if cmip:
-        return
-    if '5.625deg' in datadir:
-        valdir = datadir
-    else:
-        valdir = '/'.join(datadir.split('/')[:-2] + ['5.625deg/'])
+    if not cmip:
+        if '5.625deg' in datadir:
+            valdir = datadir
+        else:
+            valdir = '/'.join(datadir.split('/')[:-2] + ['5.625deg/'])
 
-    z500_valid = load_test_data(f'{valdir}geopotential_500', 'z', years=slice(test_years[0], test_years[1])).drop('level')
-    t850_valid = load_test_data(f'{valdir}temperature_850', 't', years=slice(test_years[0], test_years[1])).drop('level')
-    tp = xr.open_mfdataset(f'{valdir}/6hr_precipitation/*.nc', combine='by_coords').sel(
-        time=slice(test_years[0], test_years[1]))
-    t2m = xr.open_mfdataset(f'{valdir}/2m_temperature/*.nc', combine='by_coords').sel(
-        time=slice(test_years[0], test_years[1]))
-    valid = xr.merge([z500_valid, t850_valid, tp, t2m])
+        z500_valid = load_test_data(f'{valdir}geopotential_500', 'z', years=slice(test_years[0], test_years[1])).drop('level')
+        t850_valid = load_test_data(f'{valdir}temperature_850', 't', years=slice(test_years[0], test_years[1])).drop('level')
+        tp = xr.open_mfdataset(f'{valdir}/6hr_precipitation/*.nc', combine='by_coords').sel(
+            time=slice(test_years[0], test_years[1]))
+        t2m = xr.open_mfdataset(f'{valdir}/2m_temperature/*.nc', combine='by_coords').sel(
+            time=slice(test_years[0], test_years[1]))
+        valid = xr.merge([z500_valid, t850_valid, tp, t2m])
 
-    print(compute_weighted_rmse(
-        preds, valid
-    ).load())
+        print(compute_weighted_rmse(
+            preds, valid
+        ).load())
 
 
 

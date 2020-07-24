@@ -31,6 +31,7 @@ def load_model(args):
             'ChannelReLU2D': ChannelReLU2D,
             'lat_mse': tf.keras.losses.mse,
             'lat_mae': tf.keras.losses.mae,
+            'categorical_loss': tf.keras.losses.categorical_crossentropy,
         })
     return model
 
