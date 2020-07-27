@@ -39,13 +39,7 @@ def compute_weighted_rmse(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     weights_lat = np.cos(np.deg2rad(error.lat))
     weights_lat /= weights_lat.mean()
     rmse = np.sqrt(((error)**2 * weights_lat).mean(mean_dims))
-    if type(rmse) is xr.Dataset:
-        rmse = rmse.rename({v: v + '_rmse' for v in rmse})
-    else: # DataArray
-        rmse.name = error.name + '_rmse' if not error.name is None else 'rmse'
     return rmse
-
-
 
 
 def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
@@ -55,10 +49,9 @@ def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
         fc['time'] = fc.time + np.timedelta64(int(f), 'h')
         rmses.append(func(fc, da_valid, mean_dims))
     return xr.concat(rmses, 'lead_time')
-    # return xr.DataArray(rmses, dims=['lead_time'], coords={'lead_time': fc_iter.lead_time})
 
 
-def compute_weighted_acc(da_fc, da_true):
+def compute_weighted_acc(da_fc, da_true, centered=True):
     clim = da_true.mean('time')
     t = np.intersect1d(da_fc.time, da_true.time)
     fa = da_fc.sel(time=t) - clim
@@ -68,8 +61,12 @@ def compute_weighted_acc(da_fc, da_true):
     weights_lat /= weights_lat.mean()
     w = weights_lat
     
-    fa_prime = fa - fa.mean()
-    a_prime = a - a.mean()
+    if centered:
+        fa_prime = fa - fa.mean()
+        a_prime = a - a.mean()
+    else:
+        fa_prime = fa
+        a_prime = a
     
     acc = (
         np.sum(w * fa_prime * a_prime) /
@@ -78,6 +75,7 @@ def compute_weighted_acc(da_fc, da_true):
         )
     )
     return acc
+
 
 def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     """
@@ -90,15 +88,14 @@ def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     #3. find average of all I inputs. take square root
     """
     #ToDO: add assert condition to check for input size. Alternatively, if input does not have 'time' then add it as dimension
-    var1=da_fc.var('member')
+    var1=da_fc.var('member') #is it okay to use a specific name like this (?)
     weights_lat = np.cos(np.deg2rad(var1.lat))
     weights_lat /= weights_lat.mean()
     mean_spread= np.sqrt((var1*weights_lat).mean(mean_dims))
-    
-    if type(mean_spread) is xr.Dataset:
-        mean_spread = mean_spread.rename({v: v + '_mean_spread' for v in mean_spread})
-    else: # DataArray
-        mean_spread.name = error.name + '_mean_spread' if not error.name is None else 'mean_spread'
+    #var2 =  (var1*weights_lat).mean(dim={'lat','lon'})
+    #var2=var1.mean(dim={'lat','lon'}) #without weighted latitude.
+    #mean_spread=np.sqrt(var2.mean('time'))
+
     return mean_spread
 
 
@@ -165,8 +162,4 @@ def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     weights_lat = np.cos(np.deg2rad(error.lat))
     weights_lat /= weights_lat.mean()
     mae = (np.abs(error) * weights_lat).mean(mean_dims)
-    if type(mae) is xr.Dataset:
-        mae = mae.rename({v: v + '_mae' for v in mae})
-    else: # DataArray
-        mae.name = error.name + '_mae' if not error.name is None else 'mae'
     return mae

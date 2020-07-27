@@ -1,19 +1,57 @@
 import re
 import numpy as np
 import xarray as xr
+import tensorflow as tf
 import tensorflow.keras as keras
 import datetime
 from src.utils import *
+import pandas as pd
 import pdb
 import logging
-import pandas as pd
-import tensorflow.keras.utils as np_utils
+from tqdm import tqdm
+
+def _tensor_feature(value):
+    value = tf.io.serialize_tensor(value).numpy()
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def _bytes_feature(value):
+    """Returns a bytes_list from a string / byte."""
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def serialize_example(X, y):
+    feature = {
+        'X': _tensor_feature(X),
+        'y': _tensor_feature(y)
+    }
+    feature = tf.train.Features(feature=feature)
+    example_proto = tf.train.Example(features=feature)
+    return example_proto.SerializeToString()
+
+features = {
+    'X': tf.io.FixedLenFeature([], tf.string),
+    'y': tf.io.FixedLenFeature([], tf.string)
+}
+
+def _parse(example_proto):
+    return tf.io.parse_single_example(example_proto, features)
+
+def decode(example_proto):
+    dic = _parse(example_proto)
+    X = tf.io.parse_tensor(dic['X'], np.float32)
+    y = tf.io.parse_tensor(dic['y'], np.float32)
+    return X, y
+
 
 class DataGenerator(keras.utils.Sequence):
     def __init__(self, ds, var_dict, lead_time, batch_size=32, shuffle=True, load=True,
                  mean=None, std=None, output_vars=None, data_subsample=1, norm_subsample=1,
                  nt_in=1, dt_in=1, cont_time=False, fixed_time=False, multi_dt=1, verbose=0,
-                 min_lead_time=None, las_kernel=None, las_gauss_std=None, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5,is_doi=False, adaptive_bins=None):
+                 min_lead_time=None, las_kernel=None, las_gauss_std=None, normalize=True,
+                 tfrecord_files=None, tfr_buffer_size=1000, tfr_num_parallel_calls=1,
+                 cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_roll=None, X_roll=None,
+                 discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
+                 old_const=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5,
+                 predict_difference=False, adaptive_bins=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -39,17 +77,31 @@ class DataGenerator(keras.utils.Sequence):
         self.lead_time = lead_time
         self.nt_in = nt_in
         self.dt_in = dt_in
-        self.nt_offset = (nt_in - 1) * dt_in
         self.cont_time = cont_time
         self.min_lead_time = min_lead_time
         self.fixed_time = fixed_time
         self.multi_dt = multi_dt
-        self.is_categorical= is_categorical
+        self.tfrecord_files = tfrecord_files
+        self.normalize = normalize
+        self.tfr_num_parallel_calls = tfr_num_parallel_calls
+        self.tfr_buffer_size = tfr_buffer_size
+        self.cont_dt = cont_dt
+        self.tfr_prefetch = tfr_prefetch
+        self.tfr_repeat = tfr_repeat
+        self.tfr_out = tfr_out
+        self.y_roll = y_roll
+        self.X_roll = X_roll
+        self.tfr_max_lead = 120
+        self.tfr_out_idxs = tfr_out_idxs
+        self.old_const = old_const
+        self.is_categorical = is_categorical
         self.num_bins = num_bins
-        self.bin_min= bin_min
-        self.bin_max= bin_max
-        self.is_doi=is_doi
-        self.adaptive_bins=adaptive_bins
+        self.bin_min = bin_min
+        self.bin_max = bin_max
+        self.predict_difference = predict_difference
+        if self.predict_difference:
+            assert self.tfrecord_files is None, 'difference does not work for tfr'
+        self.adaptive_bins = adaptive_bins
 
         data = []
         level_names = []
@@ -63,14 +115,19 @@ class DataGenerator(keras.utils.Sequence):
                     level_names.append(var)
             else:
                 var, levels = params
+                da = ds[var]
+                if tp_log and var == 'tp':
+                    da = log_trans(da, tp_log)
                 try:
-                    data.append(ds[var].sel(level=levels))
+                    data.append(da.sel(level=levels))
                     level_names += [f'{var}_{level}' for level in levels]
                 except ValueError:
-                    data.append(ds[var].expand_dims({'level': generic_level}, 1))
+                    data.append(da.expand_dims({'level': generic_level}, 1))
                     level_names.append(var)
 
         self.data = xr.concat(data, 'level').transpose('time', 'lat', 'lon', 'level')
+        if discard_first is not None:
+            self.data = self.data.isel(time=slice(discard_first, None))
         self.data['level_names'] = xr.DataArray(
             level_names, dims=['level'], coords={'level': self.data.level})
         if output_vars is None:
@@ -83,43 +140,72 @@ class DataGenerator(keras.utils.Sequence):
 
         # Subsample
         self.data = self.data.isel(time=slice(0, None, data_subsample))
+        self.raw_data = self.data
         self.dt = self.data.time.diff('time')[0].values / np.timedelta64(1, 'h')
+        self.dt_in = int(self.dt_in // self.dt)
+        self.nt_offset = (nt_in - 1) * self.dt_in
 
+        if self.min_lead_time is None:
+            self.min_nt = 1
+        else:
+            self.min_nt = int(self.min_lead_time / self.dt)
 
         # Normalize
         if verbose: print('DG normalize', datetime.datetime.now().time())
         if mean is not None:
-            assert std is not None, 'Both mean and std have to be given'
-            self.mean = mean; self.std = std
-        elif las_kernel is not None:
-            self.mean = compute_las(
-                self.data.isel(time=slice(0, None, norm_subsample)).mean('time'),
-                las_kernel, las_gauss_std
-            )
-            self.std = compute_las(
-                self.data.isel(time=slice(0, None, norm_subsample)).std('time'),
-                las_kernel, las_gauss_std
-            )
-            self.std[:] = np.maximum(self.std, 1e-6)
-            self.mean[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).mean(
-                ('time', 'lat', 'lon')).values[self.const_idxs]
-            self.std[..., self.const_idxs] = self.data.isel(time=slice(0, None, norm_subsample)).std(
-                ('time', 'lat', 'lon')).values[self.const_idxs]
+            self.mean = mean
         else:
             self.mean = self.data.isel(time=slice(0, None, norm_subsample)).mean(
                 ('time', 'lat', 'lon')).compute()
+            if 'tp' in self.data.level_names:  # set tp mean to zero but not if ext
+                tp_idx = list(self.data.level_names).index('tp')
+                self.mean.values[tp_idx] = 0
+
+        if std is not None:
+            self.std = std
+        else:
             self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
                 ('time', 'lat', 'lon')).compute()
-        self.data = (self.data - self.mean) / self.std
+        if tp_log is not None:
+            self.mean.attrs['tp_log'] = tp_log
+            self.std.attrs['tp_log'] = tp_log
+        if normalize:
+            self.data = (self.data - self.mean) / self.std
 
-        self.on_epoch_end()
-
-        # For some weird reason calling .load() earlier messes up the mean and std computations
         if verbose: print('DG load', datetime.datetime.now().time())
         if load:
             if verbose: print('Loading data into RAM')
             self.data.load()
         if verbose: print('DG done', datetime.datetime.now().time())
+
+        if self.X_roll is not None:
+            self.X_roll = int(self.X_roll // self.dt)
+            self.X_rolled = self.data.rolling(time=self.X_roll).mean()
+            self.nt_offset += self.X_roll
+
+        self.on_epoch_end()
+
+        if self.y_roll is not None:
+            self.y_roll = int(self.y_roll // self.dt)
+            assert self.y_roll < self.nt, 'nt must be larger than y_roll'
+            self.y_rolled = self.data.isel(level=self.output_idxs).rolling(time=self.y_roll).mean()
+
+        if self.tfrecord_files is not None:
+            self.is_tfr = True
+            self._setup_tfrecord_ds()
+        else:
+            self.is_tfr = False
+            self.tfr_dataset = None
+
+        if self.is_categorical:
+            self.bins = np.linspace(self.bin_min, self.bin_max, self.num_bins+1)
+            self.bins[0] = -np.inf; self.bins[-1] = np.inf  # for rare out-of-bound cases.
+
+    def on_epoch_end(self):
+        'Updates indexes after each epoch'
+        self.idxs = np.arange(self.nt_offset, self.n_samples)
+        if self.shuffle:
+            np.random.shuffle(self.idxs)
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -127,7 +213,12 @@ class DataGenerator(keras.utils.Sequence):
     
     @property
     def shape(self):
-        return len(self.data.lat), len(self.data.lon), len(self.data.level) * self.nt_in + self.cont_time
+        return (
+            len(self.data.lat),
+            len(self.data.lon),
+            len(self.data.level.isel(level=self.not_const_idxs)) * self.nt_in + len(self.data.level.isel(
+                level=self.const_idxs)) + self.cont_time
+        )
 
     @property
     def nt(self):
@@ -136,7 +227,10 @@ class DataGenerator(keras.utils.Sequence):
 
     @property
     def init_time(self):
-        return self.data.isel(time=slice(self.nt_offset, -self.nt)).time
+        stop = -self.nt
+        if self.is_tfr:
+            stop += -(self.tfr_max_lead - self.lead_time // self.dt)
+        return self.data.isel(time=slice(self.nt_offset, int(stop))).time
 
     @property
     def valid_time(self):
@@ -145,6 +239,10 @@ class DataGenerator(keras.utils.Sequence):
         if self.multi_dt > 1:
             diff = self.nt - self.nt // self.multi_dt
             start -= diff; stop = -diff
+        if self.is_tfr:
+            stop = -int((self.tfr_max_lead - self.lead_time) // self.dt)
+            if stop == 0:
+                stop = None
         return self.data.isel(time=slice(start, stop)).time
 
     @property
@@ -152,65 +250,144 @@ class DataGenerator(keras.utils.Sequence):
         return self.data.isel(time=slice(0, -self.nt)).shape[0]
 
     def __getitem__(self, i):
+        if self.tfrecord_files is None:
+            if hasattr(self, 'cheat'):
+                X, y = self._get_item(i)
+                return X, y[-1]
+            else:
+                return self._get_item(i)
+        else:
+            return self._get_tfrecord_item(i)
+
+    def _get_item(self, i):
         'Generate one batch of data'
         idxs = self.idxs[i * self.batch_size:(i + 1) * self.batch_size]
+
         if self.cont_time:
             if not self.fixed_time:
-                if self.min_lead_time is None:
-                    min_nt = 1
-                else:
-                    min_nt = int(self.min_lead_time / self.dt)
-                nt = np.random.randint(min_nt, self.nt+1, len(idxs))
+                nt = np.random.randint(self.min_nt, self.nt + 1, len(idxs))
             else:
                 nt = np.ones(len(idxs), dtype='int') * self.nt
             ftime = (nt * self.dt / 100)[:, None, None] * np.ones((1, len(self.data.lat),
-                                                                      len(self.data.lon)))
+                                                                   len(self.data.lon)))
         else:
             nt = self.nt
-        X = self.data.isel(time=idxs).values.astype('float32')
+
+        if self.X_roll is not None:
+            X_data = self.X_rolled
+        else:
+            X_data = self.data
+
+        X = X_data.isel(time=idxs).values.astype('float32')
+
         if self.multi_dt > 1: consts = X[..., self.const_idxs]
+
         if self.nt_in > 1:
-            X = np.concatenate([
-                self.data.isel(time=idxs-nt_in*self.dt_in).values
-                                   for nt_in in range(self.nt_in-1, 0, -1)
-            ] + [X], axis=-1).astype('float32')
+            if self.old_const:
+                X = np.concatenate([
+                                       self.data.isel(time=idxs - nt_in * self.dt_in).values
+                                       for nt_in in range(self.nt_in - 1, 0, -1)
+                                   ] + [X], axis=-1).astype('float32')
+            else:
+                X = np.concatenate([
+                                       X_data.isel(time=idxs - nt_in * self.dt_in).values[..., self.not_const_idxs]
+                                       for nt_in in range(self.nt_in - 1, 0, -1)
+                                   ] + [X], axis=-1).astype('float32')
+
         if self.multi_dt > 1:
             X = [X[..., self.not_const_idxs], consts]
             step = self.nt // self.multi_dt
             y = [
                 self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
-                for nt in np.arange(step, self.nt+step, step)
+                for nt in np.arange(step, self.nt + step, step)
             ]
+        elif self.y_roll is not None:
+            y = self.y_rolled.isel(
+                time=idxs + nt,
+            ).values.astype('float32')
+        elif self.tfr_out:
+            assert self.batch_size == 1, 'bs must be one'
+            time_slice = slice(idxs[0]+self.min_nt, idxs[0]+self.nt+1)
+            y = self.data.isel(time=time_slice, level=self.output_idxs).values.astype('float32')[None]
+        elif self.predict_difference:
+            y = (
+                self.data.isel(time=idxs + nt, level=self.output_idxs).values -
+                self.data.isel(time=idxs, level=self.output_idxs).values
+            ).astype('float32')
         else:
             y = self.data.isel(time=idxs + nt, level=self.output_idxs).values.astype('float32')
-        if self.cont_time: 
+
+        if self.is_categorical:
+            y_shape = y.shape
+            y = pd.cut(y.reshape(-1), self.bins, labels=False).reshape(y_shape)
+            y = tf.keras.utils.to_categorical(y, num_classes=self.num_bins)
+
+        if self.cont_time:
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
-        
-        if self.is_categorical==True:
-            if self.is_doi:
-                y=y-X[...,self.output_idxs]#Difference of Input
-            
-            if self.adaptive_bins is None:
-                bins=np.linspace(self.bin_min,self.bin_max,self.num_bins+1)
-                bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
-                
-            else:
-                bins=self.adaptive_bins
-                bins[0]=-np.inf; bins[-1]=np.inf #for rare out-of-bound cases.
-                
-            
-            y_shape=y.shape
-            y=pd.cut(y.reshape(-1), bins, labels=False).reshape(y_shape)
-            y=np_utils.to_categorical(y, num_classes=self.num_bins)
-                
-              
         return X, y
 
-    def on_epoch_end(self):
-        'Updates indexes after each epoch'
-        self.idxs = np.arange(self.nt_offset, self.n_samples)
+
+    def _decode(self, example_proto):
+        dic = _parse(example_proto)
+        X = tf.io.parse_tensor(dic['X'], np.float32)
+        y = tf.io.parse_tensor(dic['y'], np.float32)
+        if self.tfr_out_idxs is not None:
+            y = tf.gather(y, self.tfr_out_idxs, axis=-1)
+        if self.cont_time:
+            if self.fixed_time:
+                y_idx = self.nt-1
+            else:
+                y_idx = tf.random.uniform((), self.min_nt-1, self.nt, dtype=tf.int32)
+            y_time = (y_idx+1) * self.dt
+            ftime = (y_time / 100) * np.ones((len(self.data.lat), len(self.data.lon), 1))
+            X = tf.concat([X, tf.cast(ftime, tf.float32)], -1)
+            return X, y[y_idx]
+        else:
+            y_idx = self.nt-1
+            return X, y[y_idx]
+
+    def _setup_tfrecord_ds(self):
+        # Find all files to be used
+        if type(self.tfrecord_files) is list:
+            tfr_fns = self.tfrecord_files
+        else:
+            tfr_fns = sorted(glob(self.tfrecord_files))
+
+        dataset = tf.data.TFRecordDataset(
+            tfr_fns, num_parallel_reads=self.tfr_num_parallel_calls
+        ).map(self._decode)
+
         if self.shuffle:
-            np.random.shuffle(self.idxs)
+            dataset = dataset.shuffle(
+                buffer_size=self.tfr_buffer_size, reshuffle_each_iteration=True
+            )
+
+        self.tfr_dataset = dataset.batch(self.batch_size)
+        # if self.tfr_repeat:
+        #     self.tfr_dataset = self.tfr_dataset.repeat()
+        if self.tfr_prefetch is not None:
+            self.tfr_dataset = self.tfr_dataset.prefetch(self.tfr_prefetch)
+        self.tfr_dataset_np = self.tfr_dataset.as_numpy_iterator()
+
+
+    def _get_tfrecord_item(self, i):
+        X, y = next(self.tfr_dataset_np)
+        return X, y
+
+    def to_tfr(self, savedir, steps_per_file=250):
+        assert self.batch_size == 1, 'bs must be one'
+        for i, (X, y) in tqdm(enumerate(self)):
+            if i % steps_per_file == 0:
+                c = int(np.floor(i / steps_per_file))
+                fn = f'{savedir}/{str(c).zfill(3)}.tfrecord'
+                print('Writing to file:', fn)
+                writer = tf.io.TFRecordWriter(fn)
+            serialized_example = serialize_example(X[0], y[0])  # Remove batch dimension
+            writer.write(serialized_example)
+            if i + 1 % steps_per_file == 0:
+                writer.close()
+        writer.close()
+
 
 
 class CombinedDataGenerator(keras.utils.Sequence):
@@ -228,6 +405,7 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg, bs in zip(dgs, self.bss): dg.batch_size = int(bs)
         self.mean = self.dgs[0].mean
         self.std = self.dgs[0].std
+        self.tfr_dataset = self.dgs[0].tfr_dataset
 
     @property
     def shape (self):
@@ -250,11 +428,11 @@ class CombinedDataGenerator(keras.utils.Sequence):
         for dg in self.dgs:
             dg.on_epoch_end()
 
-def create_predictions(model, dg, multi_dt=False, parametric=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5, member=None, is_doi=False, adaptive_bins=None):
+
+def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0, no_mean=False):
     """Create non-iterative predictions"""
     level_names = dg.data.isel(level=dg.output_idxs).level_names
     level = dg.data.isel(level=dg.output_idxs).level
-    
     if parametric:
         # pdb.set_trace()
         lvl = level_names.values
@@ -267,97 +445,39 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, is_categoric
         level_names = xr.concat([level_names]*2, dim='level')
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
-    
-    if is_categorical:
-        preds=model.predict(dg)[0] if multi_dt else model.predict(dg)
 
-        if member is not None:   # Create emsemble forecast.
-            interval=(bin_max-bin_min)/num_bins
-            bin_mids=np.linspace(bin_min+0.5*interval, bin_max-0.5*interval, num_bins)
+    preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
 
-            preds_shape=preds.shape
-            preds=preds.reshape(-1,num_bins)
-
-            preds_new=[]
-            for i, p in enumerate(preds):
-                sample=np.random.choice(bin_mids, size=member,p=preds[i,:],replace=True)
-                preds_new.append(sample)
-
-            preds_new=np.array(preds_new)
-            preds_new=preds_new.reshape(preds_shape[0],preds_shape[1],
-                                        preds_shape[2], member, preds_shape[3])
-
-
-            preds = xr.DataArray(
-                preds_new,
-                dims=['time', 'lat', 'lon', 'member', 'level'],
-                coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,'member':
-                    np.arange(member),'level': level,'level_names': level_names,},
-            )
-        else:   # Return binned predictions
-            
-            mean = dg.mean.isel(level=dg.output_idxs).values
-            std = dg.std.isel(level=dg.output_idxs).values
-            
-            if adaptive_bins is None:
-                bins = np.linspace(bin_min, bin_max, num_bins+1)
-            else:
-                bins=adaptive_bins
-            
-            if is_doi:#for difference of inputs method
-                unnormalized_bins = bins * std[:, None]
-            else:
-                unnormalized_bins = bins * std[:, None] + mean[:, None] 
-                          
-            
-            level_names = dg.data.isel(level=dg.output_idxs).level_names
-            level = dg.data.isel(level=dg.output_idxs).level
-            preds = xr.DataArray(
-                preds,
-                dims=['time', 'lat', 'lon', 'level', 'bin'],
-                coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                        'level': level,
-                        'level_names': level_names,
-                        'bin': np.arange(num_bins),
-                        },
-            )
-
-        
-        
-    else:
-        preds = xr.DataArray(
-            model.predict(dg)[0] if multi_dt else model.predict(dg),
-            dims=['time', 'lat', 'lon', 'level'],
-            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                    'level': level,
-                    'level_names': level_names
-                    },
-        )
-
-    if not is_categorical and member is None:
-        # Unnormalize
-        mean = dg.mean.isel(level=dg.output_idxs).values
-        std = dg.std.isel(level=dg.output_idxs).values
-        if parametric:
-            mean = np.concatenate([mean, np.zeros_like(mean)])
-            std = np.concatenate([std]*2)
-        preds = preds * std + mean
+    preds = xr.DataArray(
+        preds[0] if multi_dt else preds,
+        dims=['time', 'lat', 'lon', 'level'],
+        coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                'level': level,
+                'level_names': level_names
+                },
+    )
+    # Unnormalize
+    mean = dg.mean.isel(level=dg.output_idxs).values if not no_mean else 0
+    std = dg.std.isel(level=dg.output_idxs).values
+    if parametric:
+        mean = np.concatenate([mean, np.zeros_like(mean)])
+        std = np.concatenate([std]*2)
+    preds = preds * std + mean
 
     unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
+    # Reverse tranforms
+    if hasattr(dg.mean, 'tp_log') and 'tp' in unique_vars:
+        tp_idx = list(preds.level_names).index('tp')
+        preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
+
     das = []
     for v in unique_vars:
-        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] in v]
+        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] == v]
         da = preds.isel(level=idxs).squeeze().drop('level_names')
-        if is_categorical and member is None:
-            bin_edges = unnormalized_bins[idxs].squeeze()
-            da.attrs['bin_edges'] = bin_edges
-            da.attrs['mid_points'] = (bin_edges[1:] + bin_edges[:-1]) / 2
-            da.attrs['bin_width'] = bin_edges[1] - bin_edges[0]
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)
-
 
 def create_cont_predictions(model, dg, max_lead_time=120, dt=12, lead_time=None):
     dg.fixed_time = True
@@ -366,6 +486,7 @@ def create_cont_predictions(model, dg, max_lead_time=120, dt=12, lead_time=None)
     preds = []
     for l in tqdm(lead_time):
         dg.lead_time = l.values; dg.on_epoch_end()
+        if dg.is_tfr: dg._setup_tfrecord_ds()
         p = create_predictions(model, dg)
         p['time'] = dg.init_time
         preds.append(p)
