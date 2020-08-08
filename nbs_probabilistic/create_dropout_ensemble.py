@@ -24,7 +24,9 @@ def get_input(args):
     return dg_test
 
 def get_model(args):
+    
     tf.compat.v1.disable_eager_execution() #needed
+    
     model = keras.models.load_model(
     f'{args["model_save_dir"]}/{args["exp_id"]}.h5',
     custom_objects={'PeriodicConv2D': PeriodicConv2D, 'ChannelReLU2D': ChannelReLU2D, 
@@ -45,6 +47,12 @@ def get_model(args):
     return model2
 
 def predict(dg, model,ensemble_size, multi_dt=False, verbose=0, no_mean=False):
+#     os.environ["CUDA_VISIBLE_DEVICES"]=str(0)
+#     policy = mixed_precision.Policy('mixed_float16')
+#     mixed_precision.set_policy(policy)
+    
+    level_names = dg.data.isel(level=dg.output_idxs).level_names
+    level = dg.data.isel(level=dg.output_idxs).level
     
     preds = []
     for _ in tqdm(range(ensemble_size)):
@@ -82,6 +90,7 @@ def predict(dg, model,ensemble_size, multi_dt=False, verbose=0, no_mean=False):
     return(xr.merge(das))    
 
 def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
+    
     os.environ["CUDA_VISIBLE_DEVICES"]=str(0)
     policy = mixed_precision.Policy('mixed_float16')
     mixed_precision.set_policy(policy)
@@ -102,8 +111,8 @@ def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
 #     datadir='/home/garg/data/WeatherBench/5.625deg'
 #     pred_save_dir='/home/garg/data/WeatherBench/predictions'
     
-    preds.to_netcdf(f'{args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1.nc')
-    print(f'saved on disk in {args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1.nc')
+    preds.to_netcdf(f'{args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1_m50.nc')
+    print(f'saved on disk in {args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1_m50.nc')
     return
 
     
