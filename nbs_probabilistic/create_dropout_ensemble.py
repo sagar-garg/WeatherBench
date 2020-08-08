@@ -16,96 +16,85 @@ from tqdm import tqdm
 #pass optional arguments: start_date, end_date
 
 
-def get_input(args, exp_id_path, datadir, model_save_dir,start_date=None,end_date=None):
+def get_input(args):
     #essential arguments
-    args=load_args(exp_id_path)
-    exp_id=args['exp_id']
-    var_dict=args['var_dict']
-    batch_size=args['batch_size']
-    output_vars=args['output_vars']
-    
-    #optional inputs. see load_args() for default values.
-    data_subsample=args['data_subsample']
-    norm_subsample=args['norm_subsample'] #doesnt matter since we pass external mean/std
-    nt_in=args['nt_in']
-    #nt_in=args['nt']
-    dt_in=args['dt_in']
-    lead_time=args['lead_time']
-    test_years=args['test_years']
-    
-    #changing paths
-#   model_save_dir='/home/garg/data/WeatherBench/predictions/saved_models'
-#   datadir='/home/garg/data/WeatherBench/5.625deg'
-    
-    #run data generator
-    ds = xr.merge([xr.open_mfdataset(f'{datadir}/{var}/*.nc', combine='by_coords') 
-                   for var in var_dict.keys()])
-    mean = xr.open_dataarray(f'{model_save_dir}/{exp_id}_mean.nc') 
-    std = xr.open_dataarray(f'{model_save_dir}/{exp_id}_std.nc')
-    
-    if (start_date and end_date)!=None:
-        ds_test=ds.sel(time=slice(start_date,end_date))
-    else:
-        ds_test= ds.sel(time=slice(test_years[0],test_years[-1]))
-    #Shuffle should be false. nt_in, data_subsample needed and should not be changed.
-    dg_test = DataGenerator(ds_test, var_dict, lead_time, batch_size=batch_size, shuffle=False,
-                            load=True,mean=mean, std=std, output_vars=output_vars,
-                            data_subsample=data_subsample, norm_subsample=norm_subsample,
-                            nt_in=nt_in,dt_in=dt_in) 
+    args['ext_mean'] =xr.open_dataarray(f'{args["model_save_dir"]}/{args["exp_id"]}_mean.nc')
+    args['ext_std'] = xr.open_dataarray(f'{args["model_save_dir"]}/{args["exp_id"]}_std.nc')
+    dg_test=load_data(**args, old_const=True, only_test=True)
     return dg_test
 
-def get_model(exp_id, model_save_dir):
+def get_model(args):
     tf.compat.v1.disable_eager_execution() #needed
-    saved_model_path=f'{model_save_dir}/{exp_id}.h5'
+    model = keras.models.load_model(
+    f'{args["model_save_dir"]}/{args["exp_id"]}.h5',
+    custom_objects={'PeriodicConv2D': PeriodicConv2D, 'ChannelReLU2D': ChannelReLU2D, 
+                   'lat_mse': tf.keras.losses.mse})
+#RECHECK LOSS fn.!
     
-    substr=['resnet','unet_google','unet']
-    assert any(x in exp_id for x in substr)
-    model=tf.keras.models.load_model(saved_model_path,custom_objects={'PeriodicConv2D':PeriodicConv2D,
-                                    'lat_mse': tf.keras.losses.mse})
     #adding dropout
     c = model.get_config()
     for l in c['layers']:
         if l['class_name'] == 'Dropout':
             l['inbound_nodes'][0][0][-1] = {'training': True}
     
-    model2 = keras.models.Model.from_config(c, custom_objects={'PeriodicConv2D':PeriodicConv2D,'lat_mse':tf.keras.losses.mse})
+    model2 = keras.models.Model.from_config(c, custom_objects={'PeriodicConv2D': PeriodicConv2D, 'ChannelReLU2D': ChannelReLU2D, 'lat_mse': tf.keras.losses.mse})
     model2.set_weights(model.get_weights())
             
     #ToDo: add other loss functions to custom_objects. doesn't matter if it is not used in the model itself, only so that load_model() doesn't break)
-    #model2.summary()
+    
     return model2
 
-def predict(dg_test,model,ensemble_size, output_vars):
+def predict(dg, model,ensemble_size, multi_dt=False, verbose=0, no_mean=False):
     
     preds = []
     for _ in tqdm(range(ensemble_size)):
-        preds.append(model.predict(dg_test))
+        preds.append(model.predict(dg.tfr_dataset or dg, verbose=verbose))
     
-    pred_ensemble = np.array(preds)
-    #unnormalize
-    pred_ensemble=(pred_ensemble * dg_test.std.isel(level=dg_test.output_idxs).values +
-                   dg_test.mean.isel(level=dg_test.output_idxs).values)
+    preds = np.array(preds)
     
-    #numpy --> xarray.
-    preds = xr.Dataset()
-    for i,var in enumerate(output_vars):
-        da= xr.DataArray(pred_ensemble[...,i], 
-                         coords={'member': np.arange(ensemble_size),
-                                 'time': dg_test.valid_time,
-                                 'lat': dg_test.data.lat, 'lon': dg_test.data.lon,}, 
-                         dims=['member', 'time','lat', 'lon'])
-        preds[var]=da
-        
-    return preds
 
-def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, start_date=None,end_date=None):
-    args=load_args(exp_id_path)
-    exp_id=args['exp_id']
-    output_vars=args['output_vars']
+    preds = xr.DataArray(
+        preds[0] if multi_dt else preds,
+        dims=['member','time', 'lat', 'lon', 'level'],
+        coords={'member':np.arange(ensemble_size),'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                'level': level,
+                'level_names': level_names
+                },
+    )
+    # Unnormalize
+    mean = dg.mean.isel(level=dg.output_idxs).values if not no_mean else 0
+    std = dg.std.isel(level=dg.output_idxs).values
+    preds = preds * std + mean
     
-    dg_test=get_input(args, exp_id_path, datadir, model_save_dir, start_date,end_date)
-    mymodel=get_model(exp_id, model_save_dir)
-    preds=predict(dg_test,mymodel,ensemble_size, output_vars)
+    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
+
+    # Reverse tranforms
+    if hasattr(dg.mean, 'tp_log') and 'tp' in unique_vars:
+        tp_idx = list(preds.level_names).index('tp')
+        preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
+
+    das = []
+    for v in unique_vars:
+        idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] == v]
+        da = preds.isel(level=idxs).squeeze().drop('level_names')
+        if not 'level' in da.dims: da = da.drop('level')
+        das.append({v: da})
+    return(xr.merge(das))    
+
+def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
+    os.environ["CUDA_VISIBLE_DEVICES"]=str(0)
+    policy = mixed_precision.Policy('mixed_float16')
+    mixed_precision.set_policy(policy)
+    
+    
+    args=load_args(exp_id_path)
+    args['model_save_dir']=model_save_dir
+    args['pred_save_dir']=pred_save_dir
+    args['datadir']=datadir
+    #args['test_years']=['2018-12-01','2018-12-31']
+    dg_test=get_input(args)
+    mymodel=get_model(args)
+    preds=predict(dg_test,mymodel,ensemble_size, multi_dt=False, verbose=0, no_mean=False)
     
     
     #changing paths
@@ -113,8 +102,8 @@ def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, sta
 #     datadir='/home/garg/data/WeatherBench/5.625deg'
 #     pred_save_dir='/home/garg/data/WeatherBench/predictions'
     
-    preds.to_netcdf(f'{pred_save_dir}/{exp_id}.nc')
-    print(f'saved on disk in {pred_save_dir}/{exp_id}.nc')
+    preds.to_netcdf(f'{args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1.nc')
+    print(f'saved on disk in {args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1.nc')
     return
 
     
