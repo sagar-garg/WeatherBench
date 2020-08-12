@@ -321,6 +321,7 @@ class DataGenerator(keras.utils.Sequence):
             y_shape = y.shape
             y = pd.cut(y.reshape(-1), self.bins, labels=False).reshape(y_shape)
             y = tf.keras.utils.to_categorical(y, num_classes=self.num_bins)
+            y = y.reshape((*y_shape, self.num_bins))
 
         if self.cont_time:
             X = np.concatenate([X, ftime[..., None]], -1).astype('float32')
