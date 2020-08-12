@@ -51,7 +51,7 @@ class DataGenerator(keras.utils.Sequence):
                  cont_dt=1, tfr_prefetch=None, tfr_repeat=True, y_roll=None, X_roll=None,
                  discard_first=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
                  old_const=False, is_categorical=False, num_bins=50, bin_min=-5, bin_max=5,
-                 predict_difference=False, adaptive_bins=None):
+                 predict_difference=False, quantile_bins=None):
         """
         Data generator for WeatherBench data.
         Template from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
@@ -101,7 +101,7 @@ class DataGenerator(keras.utils.Sequence):
         self.predict_difference = predict_difference
         if self.predict_difference:
             assert self.tfrecord_files is None, 'difference does not work for tfr'
-        self.adaptive_bins = adaptive_bins
+        self.quantile_bins = quantile_bins
 
         data = []
         level_names = []
@@ -198,8 +198,16 @@ class DataGenerator(keras.utils.Sequence):
             self.tfr_dataset = None
 
         if self.is_categorical:
-            self.bins = np.linspace(self.bin_min, self.bin_max, self.num_bins+1)
-            self.bins[0] = -np.inf; self.bins[-1] = np.inf  # for rare out-of-bound cases.
+            if self.quantile_bins:
+                # Get a sample
+                self.is_categorical = False
+                _, y_sample = self._get_item(0)   # Assume shuffled
+                self.is_categorical = True
+                self.bins = np.quantile(y_sample.flatten(), np.linspace(0, 1, self.num_bins+1))
+                self.bins[0] = -np.inf; self.bins[-1] = np.inf
+            else:
+                self.bins = np.linspace(self.bin_min, self.bin_max, self.num_bins+1)
+                self.bins[0] = -np.inf; self.bins[-1] = np.inf  # for rare out-of-bound cases.
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
