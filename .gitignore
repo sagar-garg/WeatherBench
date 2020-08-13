@@ -6,3 +6,10 @@ bilinear_*
 ._.DS_Store
 .vscode
 .DS_Store
+devlog/*.png
+devlog/*.pdf
+devlog/*.nc
+devlog/*.pkl
+devlog/*.csv
+devlog/*.npy
+
