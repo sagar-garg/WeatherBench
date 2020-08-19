@@ -455,23 +455,49 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0, n
         level_names[:] = lvl
         level = xr.concat([level]*2, dim='level')
 
-    preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
+    
 
-    preds = xr.DataArray(
-        preds[0] if multi_dt else preds,
-        dims=['time', 'lat', 'lon', 'level'],
-        coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
-                'level': level,
-                'level_names': level_names
-                },
-    )
-    # Unnormalize
     mean = dg.mean.isel(level=dg.output_idxs).values if not no_mean else 0
     std = dg.std.isel(level=dg.output_idxs).values
-    if parametric:
-        mean = np.concatenate([mean, np.zeros_like(mean)])
-        std = np.concatenate([std]*2)
-    preds = preds * std + mean
+
+    if dg.is_categorical:
+        # preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
+        preds = []
+        for X, y in tqdm(dg):
+            preds.append(model.predict(X))
+        preds = np.concatenate(preds)
+        if dg.predict_difference:
+            unnormalized_bins = dg.bins * std[:, None]
+        else:
+            unnormalized_bins = dg.bins * std[:, None] + mean[:, None] 
+        
+        level_names = dg.data.isel(level=dg.output_idxs).level_names
+        level = dg.data.isel(level=dg.output_idxs).level
+        preds = xr.DataArray(
+            preds,
+            dims=['time', 'lat', 'lon', 'level', 'bin'],
+            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                    'level': level,
+                    'level_names': level_names,
+                    'bin': np.arange(dg.num_bins),
+                    },
+        )
+    else:
+        preds = model.predict(dg.tfr_dataset or dg, verbose=verbose)
+        preds = xr.DataArray(
+            preds[0] if multi_dt else preds,
+            dims=['time', 'lat', 'lon', 'level'],
+            coords={'time': dg.valid_time, 'lat': dg.data.lat, 'lon': dg.data.lon,
+                    'level': level,
+                    'level_names': level_names
+                    },
+        )
+        # Unnormalize
+        
+        if parametric:
+            mean = np.concatenate([mean, np.zeros_like(mean)])
+            std = np.concatenate([std]*2)
+        preds = preds * std + mean
 
     unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
@@ -484,6 +510,11 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0, n
     for v in unique_vars:
         idxs = [i for i, vv in enumerate(preds.level_names.values) if vv.split('_')[0] == v]
         da = preds.isel(level=idxs).squeeze().drop('level_names')
+        if dg.is_categorical:
+            bin_edges = unnormalized_bins[idxs].squeeze()
+            da.attrs['bin_edges'] = bin_edges
+            da.attrs['mid_points'] = (bin_edges[1:] + bin_edges[:-1]) / 2
+            da.attrs['bin_width'] = bin_edges[1] - bin_edges[0]
         if not 'level' in da.dims: da = da.drop('level')
         das.append({v: da})
     return xr.merge(das)
