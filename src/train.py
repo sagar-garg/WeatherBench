@@ -33,7 +33,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
               train_tfr_files=None, valid_tfr_files=None, test_tfr_files=None, tfr_num_parallel_calls=1,
               tfr_buffer_size=1000, tfr_prefetch=None, y_roll=None, X_roll=None, discard_first=None,
               min_lead_time=None, tp_log=None, tfr_out=False, tfr_out_idxs=None,
-              predict_difference=False, is_categorical=False, bin_min=None, bin_max=None,
+              predict_difference=False, is_categorical=False, bin_min=None, bin_max=None, old_const=False,
               num_bins=None, quantile_bins=False,
               **kwargs):
     if type(ext_mean) is str: ext_mean = xr.open_dataarray(ext_mean)
@@ -77,7 +77,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_prefetch=tfr_prefetch, y_roll=y_roll, X_roll=X_roll, discard_first=discard_first,
             min_lead_time=min_lead_time, tp_log=tp_log, verbose=1, tfr_out=tfr_out,
             tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, quantile_bins=quantile_bins
+            is_categorical=is_categorical, old_const=old_const, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, quantile_bins=quantile_bins
         )
 
         dg_valid = DataGenerator(
@@ -95,7 +95,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
             tfr_repeat=False,
             min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
             tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-            is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, quantile_bins=quantile_bins
+            is_categorical=is_categorical, old_const=old_const, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, quantile_bins=quantile_bins
         )
 
     dg_test = DataGenerator(
@@ -113,7 +113,7 @@ def load_data(var_dict, datadir, cmip, cmip_dir, train_years, valid_years, test_
         tfr_repeat=False,
         min_lead_time=min_lead_time, tp_log=tp_log, tfr_out=tfr_out,
         tfr_out_idxs=tfr_out_idxs, predict_difference=predict_difference,
-        is_categorical=is_categorical, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, 
+        is_categorical=is_categorical, old_const=old_const, bin_min=bin_min, bin_max=bin_max, num_bins=num_bins, 
         quantile_bins=quantile_bins
     )
     if only_test:
