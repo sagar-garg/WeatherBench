@@ -349,16 +349,16 @@ def create_lat_crps_lcgev(lat, n_vars):
     weights_lat = np.cos(np.deg2rad(lat)).values
     weights_lat /= weights_lat.mean()
     def crps_lcgev_loss(y_true, y_pred):
-        mu, sigma, xi = y_pred[:, 0], y_pred[:, 1], y_pred[:, 2]
+        mu, sigma, xi = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         sigma = tf.nn.relu(sigma)
         # Make sure xi isn't 0
     #     eps = 1e-7
     #     xi = tf.where(tf.abs(xi)<eps, eps, xi)
     #     # Keep xi in bounds
-        xi = tf.clip_by_value(xi, -0.278, 1)
+        xi = tf.clip_by_value(xi, -0.278, 0.999)
         # import pdb
         # pdb.set_trace()
-        return crps_lcgev_tf(y_true, mu, sigma, xi) * weights_lat[None, : , None, None]
+        return crps_lcgev_tf(y_true[..., 0], mu, sigma, xi) * weights_lat[None, : , None]
     return crps_lcgev_loss
 
 
