@@ -20,7 +20,7 @@ def get_input(args):
     #essential arguments
     args['ext_mean'] =xr.open_dataarray(f'{args["model_save_dir"]}/{args["exp_id"]}_mean.nc')
     args['ext_std'] = xr.open_dataarray(f'{args["model_save_dir"]}/{args["exp_id"]}_std.nc')
-    dg_test=load_data(**args, old_const=True, only_test=True)
+    dg_test=load_data(**args, only_test=True)
     return dg_test
 
 def get_model(args):
@@ -89,9 +89,9 @@ def predict(dg, model,ensemble_size, multi_dt=False, verbose=0, no_mean=False):
         das.append({v: da})
     return(xr.merge(das))    
 
-def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
+def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, data_subsample=1, gpu=0):
     
-    os.environ["CUDA_VISIBLE_DEVICES"]=str(0)
+    os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     policy = mixed_precision.Policy('mixed_float16')
     mixed_precision.set_policy(policy)
     
@@ -100,6 +100,10 @@ def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
     args['model_save_dir']=model_save_dir
     args['pred_save_dir']=pred_save_dir
     args['datadir']=datadir
+    args['data_subsample'] = data_subsample
+    args['train_tfr_files'] = None
+    args['valid_tfr_files'] = None
+    args['test_tfr_files'] = None
     #args['test_years']=['2018-12-01','2018-12-31']
     dg_test=get_input(args)
     mymodel=get_model(args)
@@ -111,8 +115,8 @@ def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir):
 #     datadir='/home/garg/data/WeatherBench/5.625deg'
 #     pred_save_dir='/home/garg/data/WeatherBench/predictions'
     
-    preds.to_netcdf(f'{args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1_m50.nc')
-    print(f'saved on disk in {args["pred_save_dir"]}/{args["exp_id"]}_dr_0.1_m50.nc')
+    preds.to_netcdf(f'{args["pred_save_dir"]}/{args["exp_id"]}_m{ensemble_size}.nc')
+    print(f'saved on disk in {args["pred_save_dir"]}/{args["exp_id"]}_m{ensemble_size}.nc')
     return
 
     
