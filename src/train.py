@@ -258,6 +258,8 @@ def train(datadir, var_dict, output_vars, filters, kernels, lr, batch_size, earl
             loss = create_lat_crps(dg_train.data.lat, len(dg_train.output_idxs), relu=True)
         if loss == 'lat_crps_mae':
             loss = create_lat_crps_mae(dg_train.data.lat, len(dg_train.output_idxs))
+        if loss == 'lat_crps_lcgev':
+            loss = create_lat_crps_lcgev(dg_train.data.lat, len(dg_train.output_idxs))
         if loss == 'lat_log_loss':
             loss = create_lat_log_loss(dg_train.data.lat, len(dg_train.output_idxs))
         if loss == 'lat_categorical_crossentropy':
