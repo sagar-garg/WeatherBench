@@ -72,6 +72,7 @@ class DataGenerator(keras.utils.Sequence):
         if verbose: print('DG start', datetime.datetime.now().time())
         self.ds = ds
         self.var_dict = var_dict
+        self.output_vars = output_vars
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.lead_time = lead_time
@@ -166,6 +167,7 @@ class DataGenerator(keras.utils.Sequence):
         else:
             self.std = self.data.isel(time=slice(0, None, norm_subsample)).std(
                 ('time', 'lat', 'lon')).compute()
+
         if tp_log is not None:
             self.mean.attrs['tp_log'] = tp_log
             self.std.attrs['tp_log'] = tp_log
@@ -203,6 +205,11 @@ class DataGenerator(keras.utils.Sequence):
                 self.is_categorical = False
                 _, y_sample = self._get_item(0)   # Assume shuffled
                 self.is_categorical = True
+
+                if 'tp' in self.output_vars:
+                    assert len(self.output_vars) == 1, 'tp must be stand-alone'
+                    y_sample = y_sample.flatten()[y_sample.flat > 0]
+                
                 self.bins = np.quantile(y_sample.flatten(), np.linspace(0, 1, self.num_bins+1))
                 self.bins[0] = -np.inf; self.bins[-1] = np.inf
             else:
