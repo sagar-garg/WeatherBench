@@ -506,12 +506,12 @@ def create_predictions(model, dg, multi_dt=False, parametric=False, verbose=0, n
             std = np.concatenate([std]*2)
         preds = preds * std + mean
 
-    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
+        # Reverse tranforms
+        if hasattr(dg.mean, 'tp_log') and 'tp' in unique_vars:
+            tp_idx = list(preds.level_names).index('tp')
+            preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
 
-    # Reverse tranforms
-    if hasattr(dg.mean, 'tp_log') and 'tp' in unique_vars:
-        tp_idx = list(preds.level_names).index('tp')
-        preds.values[..., tp_idx] = log_retrans(preds.values[..., tp_idx], dg.mean.tp_log)
+    unique_vars = list(set([l.split('_')[0] for l in preds.level_names.values]))
 
     das = []
     for v in unique_vars:
