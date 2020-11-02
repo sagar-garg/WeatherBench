@@ -89,7 +89,7 @@ def predict(dg, model,ensemble_size, multi_dt=False, verbose=0, no_mean=False):
         das.append({v: da})
     return(xr.merge(das))    
 
-def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, data_subsample=1, gpu=0):
+def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, data_subsample=1, dt=6, gpu=0):
     
     os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu)
     policy = mixed_precision.Policy('mixed_float16')
@@ -101,6 +101,7 @@ def main(ensemble_size, exp_id_path, datadir, model_save_dir, pred_save_dir, dat
     args['pred_save_dir']=pred_save_dir
     args['datadir']=datadir
     args['data_subsample'] = data_subsample
+    args['dt'] = dt
     args['train_tfr_files'] = None
     args['valid_tfr_files'] = None
     args['test_tfr_files'] = None
