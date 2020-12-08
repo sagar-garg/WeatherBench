@@ -1,0 +1,9 @@
+datadir: /data/stephan/WeatherBench/CMIP/MPI-ESM
+name: precipitation_flux
+cmip_name: pr
+era_name: pr
+output_type: 6hrPlev
+run: r1i1p1f1
+res:
+  - 2.8125
+  - 5.625

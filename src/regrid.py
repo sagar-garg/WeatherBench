@@ -27,10 +27,10 @@ def regrid(
         ds_in = ds_in.rename({'latitude': 'lat', 'longitude': 'lon'})
     if cmip:
         ds_in = ds_in.drop(('lat_bnds', 'lon_bnds'))
-        try:
+        if hasattr(ds_in, 'plev_bnds'):
             ds_in = ds_in.drop(('plev_bnds'))
-        except ValueError:
-            pass
+        if hasattr(ds_in, 'time_bnds'):
+            ds_in = ds_in.drop(('time_bnds'))
     if rename is not None:
         ds_in = ds_in.rename({rename[0]: rename[1]})
 
@@ -50,20 +50,27 @@ def regrid(
     # Hack to speed up regridding of large files
     ds_list = []
     chunk_size = 500
-    n_chunks = len(ds_in.time) // chunk_size + 1
-    for i in range(n_chunks+1):
-        ds_small = ds_in.isel(time=slice(i*chunk_size, (i+1)*chunk_size))
-        ds_list.append(regridder(ds_small).astype('float32'))
-    ds_out = xr.concat(ds_list, dim='time')
+    if hasattr(ds_in, 'time'):
+        n_chunks = len(ds_in.time) // chunk_size + 1
+        for i in range(n_chunks+1):
+            ds_small = ds_in.isel(time=slice(i*chunk_size, (i+1)*chunk_size))
+            ds_list.append(regridder(ds_small, keep_attrs=True).astype('float32'))
+        ds_out = xr.concat(ds_list, dim='time')
+    else:
+        ds_out = regridder(ds_in, keep_attrs=True).astype('float32')
 
-    # Set attributes since they get lost during regridding
-    for var in ds_out:
-        ds_out[var].attrs =  ds_in[var].attrs
-    ds_out.attrs.update(ds_in.attrs)
+    # # Set attributes since they get lost during regridding
+    # for var in ds_out:
+    #     ds_out[var].attrs =  ds_in[var].attrs
+    # ds_out.attrs.update(ds_in.attrs)
 
     if rename is not None:
         if rename[0] == 'zg':
             ds_out['z'] *= 9.807
+        if rename[0] == 'rsdt':
+            ds_out['tisr'] *= 60*60
+            ds_out = ds_out.isel(time=slice(1, None, 12))
+            ds_out = ds_out.assign_coords({'time': ds_out.time + np.timedelta64(90, 'm')})
 
     # # Regrid dataset
     # ds_out = regridder(ds_in)
@@ -90,6 +97,7 @@ def main(
     :param custom_fn: If not None, use custom file name. Otherwise infer from parameters.
     :param file_ending: Default = nc
     """
+
     # Make sure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     # Get files for starred expressions
