@@ -8,6 +8,8 @@ import sys
 import pdb
 from scipy.signal import convolve
 from scipy.ndimage import gaussian_filter
+import tensorflow as tf
+from .networks import PeriodicConv2D, ChannelReLU2D
 
 def in_notebook():
     """
@@ -20,6 +22,19 @@ if in_notebook():
     from tqdm.notebook import tqdm
 else:
     from tqdm import tqdm
+
+def load_model(args):
+    model = tf.keras.models.load_model(
+        f'{args["model_save_dir"]}/{args["exp_id"]}.h5',
+        custom_objects={
+            'PeriodicConv2D': PeriodicConv2D,
+            'ChannelReLU2D': ChannelReLU2D,
+            'lat_mse': tf.keras.losses.mse,
+            'lat_mae': tf.keras.losses.mae,
+            'categorical_loss': tf.keras.losses.categorical_crossentropy,
+        })
+    return model
+
 
 def to_pickle(obj, fn):
     with open(fn, 'wb') as f:
@@ -134,3 +149,18 @@ def compute_las(da, k, gauss_std=None, omit_idxs=[]):
         arr = np.concatenate([gaussian_filter(arr[..., i], gauss_std) for i in range(arr.shape[-1])], -1)
     da_out[:] = arr
     return da_out
+
+def tfr_predict(model, dg, verbose=0):
+    dg.tfr_repeat = False
+    dg._setup_tfrecord_ds()
+    preds_tfr = []
+    for _ in tqdm(range(len(dg)), disable=not verbose):
+        X, y = dg[_]
+        preds_tfr.append(model(X))
+    return np.concatenate(preds_tfr)
+
+def log_trans(x, e):
+    return np.log(x + e) - np.log(e)
+
+def log_retrans(x, e):
+    return np.exp(x + np.log(e)) - e

@@ -1,0 +1,34 @@
+exp_id: 136.1-resnet_tfr_ref_ctrl
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 2]
+kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+lead_time: 72
+lr: 0.5e-4
+early_stopping_patience: 10
+reduce_lr_patience: 5
+min_es_delta: 0.0001
+data_subsample: 1
+norm_subsample: 30000
+bn_position: post
+dropout: 0.1
+l2: 1e-5
+activation: leakyrelu
+nt: 3
+loss: lat_mse
+batch_size: 32
+
+#tfrecord_files: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/*.tfrecord
+ext_mean: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/mean.nc
+ext_std: /data/stephan/WeatherBench/TFR/era_5.625_1979_2018/std.nc
+tfr_cycle_length: 26
+tfr_num_parallel_calls: 26
+tfr_buffer_size: 1000
+tfr_fpds: 17
+
+train_years: [2000, 2015]
+
+

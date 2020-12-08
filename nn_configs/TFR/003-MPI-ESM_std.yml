@@ -1,0 +1,26 @@
+exp_id: 003-MPI-ESM_std
+datadir: /data/stephan/WeatherBench/5.625deg/
+model_save_dir: /home/rasp/data/myWeatherBench/predictions/saved_models/
+pred_save_dir: /home/rasp/data/myWeatherBench/predictions/
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'constants': ['lsm','orography','lat2d']}
+output_vars: [z_500, t_850]
+data_subsample: 1
+norm_subsample: 30000
+nt: 3
+lead_time: 120
+batch_size: 1
+tfr_out: 1
+
+filters: [1, 1]
+kernels: [1, 1]
+
+cmip: 1
+cmip_dir: /data/stephan/WeatherBench/CMIP/MPI-ESM/5.625deg/
+train_years: [1850, 2005]
+valid_years: [2006, 2014]
+test_years: [2014, 2014]
+#train_years: [2005, 2005]
+#valid_years: [2005, 2005]
+#test_years: [2005, 2005]
+ext_mean: /data/stephan/WeatherBench/TFR/002-era_std/mean.nc
+ext_std: /data/stephan/WeatherBench/TFR/002-era_std/std.nc

@@ -5,6 +5,8 @@ import numpy as np
 import xarray as xr
 #import properscoring as ps
 import xskillscore as xs
+import tqdm
+from tqdm import tqdm
 
 def load_test_data(path, var, years=slice('2017', '2018'), cmip=False):
     """
@@ -39,13 +41,7 @@ def compute_weighted_rmse(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     weights_lat = np.cos(np.deg2rad(error.lat))
     weights_lat /= weights_lat.mean()
     rmse = np.sqrt(((error)**2 * weights_lat).mean(mean_dims))
-    if type(rmse) is xr.Dataset:
-        rmse = rmse.rename({v: v + '_rmse' for v in rmse})
-    else: # DataArray
-        rmse.name = error.name + '_rmse' if not error.name is None else 'rmse'
     return rmse
-
-
 
 
 def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
@@ -55,10 +51,9 @@ def evaluate_iterative_forecast(da_fc, da_valid, func, mean_dims=xr.ALL_DIMS):
         fc['time'] = fc.time + np.timedelta64(int(f), 'h')
         rmses.append(func(fc, da_valid, mean_dims))
     return xr.concat(rmses, 'lead_time')
-    # return xr.DataArray(rmses, dims=['lead_time'], coords={'lead_time': fc_iter.lead_time})
 
 
-def compute_weighted_acc(da_fc, da_true):
+def compute_weighted_acc(da_fc, da_true, centered=True):
     clim = da_true.mean('time')
     t = np.intersect1d(da_fc.time, da_true.time)
     fa = da_fc.sel(time=t) - clim
@@ -68,8 +63,12 @@ def compute_weighted_acc(da_fc, da_true):
     weights_lat /= weights_lat.mean()
     w = weights_lat
     
-    fa_prime = fa - fa.mean()
-    a_prime = a - a.mean()
+    if centered:
+        fa_prime = fa - fa.mean()
+        a_prime = a - a.mean()
+    else:
+        fa_prime = fa
+        a_prime = a
     
     acc = (
         np.sum(w * fa_prime * a_prime) /
@@ -78,6 +77,7 @@ def compute_weighted_acc(da_fc, da_true):
         )
     )
     return acc
+
 
 def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     """
@@ -89,16 +89,11 @@ def compute_weighted_meanspread(da_fc,mean_dims=xr.ALL_DIMS):
     #2. for each input i, find latitude-weighted average of all the lat*lon points
     #3. find average of all I inputs. take square root
     """
-    #ToDO: add assert condition to check for input size. Alternatively, if input does not have 'time' then add it as dimension
     var1=da_fc.var('member')
     weights_lat = np.cos(np.deg2rad(var1.lat))
     weights_lat /= weights_lat.mean()
     mean_spread= np.sqrt((var1*weights_lat).mean(mean_dims))
     
-    if type(mean_spread) is xr.Dataset:
-        mean_spread = mean_spread.rename({v: v + '_mean_spread' for v in mean_spread})
-    else: # DataArray
-        mean_spread.name = error.name + '_mean_spread' if not error.name is None else 'mean_spread'
     return mean_spread
 
 
@@ -165,8 +160,84 @@ def compute_weighted_mae(da_fc, da_true, mean_dims=xr.ALL_DIMS):
     weights_lat = np.cos(np.deg2rad(error.lat))
     weights_lat /= weights_lat.mean()
     mae = (np.abs(error) * weights_lat).mean(mean_dims)
-    if type(mae) is xr.Dataset:
-        mae = mae.rename({v: v + '_mae' for v in mae})
-    else: # DataArray
-        mae.name = error.name + '_mae' if not error.name is None else 'mae'
     return mae
+
+def compute_bin_crps(obs, preds, bin_edges):
+    """
+    Last axis must be bin axis
+    obs: [...]
+    preds: [..., n_bins]
+    """
+#     pdb.set_trace()
+    obs = obs.values
+    preds = preds.values
+
+    # Convert observation
+    a = np.minimum(bin_edges[1:], obs[..., None])
+#     b = bin_edges[:-1] * (bin_edges[0:-1] > obs[..., None])
+    b = np.where(bin_edges[:-1] > obs[..., None], bin_edges[:-1],  -np.inf)
+    y = np.maximum(a, b)
+#     print('a =', a)
+#     print('b =', b)
+#     print('y =', y)
+    # Convert predictions to cumulative predictions with a zero at the beginning
+    cum_preds = np.cumsum(preds, -1)
+    cum_preds_zero = np.concatenate([np.zeros((*cum_preds.shape[:-1], 1)), cum_preds], -1)
+    xmin = bin_edges[..., :-1]
+    xmax = bin_edges[..., 1:]
+    lmass = cum_preds_zero[..., :-1]
+    umass = 1 - cum_preds_zero[..., 1:]
+#     y = np.atleast_1d(y)
+#     xmin, xmax = np.atleast_1d(xmin), np.atleast_1d(xmax)
+#     lmass, lmass = np.atleast_1d(lmass), np.atleast_1d(lmass)
+    scale = xmax - xmin
+#     print('scale =', scale)
+    y_scale = (y - xmin) / scale
+#     print('y_scale = ', y_scale)
+    
+    z = y_scale.copy()
+    z[z < 0] = 0
+    z[z > 1] = 1
+#     print('z =', z)
+    a = 1 - (lmass + umass)
+#     print('a =', a)
+    crps = (
+        np.abs(y_scale - z) + z**2 * a - z * (1 - 2*lmass) + 
+        a**2 / 3 + (1 - lmass) * umass
+    )
+    return np.sum(scale * crps, -1)
+
+def compute_bin_crps_da(da_true, da_fc, batch=100):
+    n = int(np.ceil(len(da_fc.time) / batch))
+    result = []
+    for i in tqdm(range(n)):
+        sl = slice(i*batch, (i+1)*batch)
+        r = compute_bin_crps(da_true.isel(time=sl), da_fc.isel(time=sl), da_fc.bin_edges)
+        result.append(r)
+    return np.concatenate(result)
+    
+def compute_weighted_bin_crps(da_fc, da_true, mean_dims=xr.ALL_DIMS):
+    """
+    """
+    t = np.intersect1d(da_fc.time, da_true.time)
+    da_fc, da_true = da_fc.sel(time=t), da_true.sel(time=t)
+    weights_lat = np.cos(np.deg2rad(da_true.lat))
+    weights_lat /= weights_lat.mean()
+    dims = ['time', 'lat', 'lon']
+    if type(da_true) is xr.Dataset:
+        das = []
+        for var in da_true:
+            result = compute_bin_crps_da(da_true[var], da_fc[var])
+#             result = compute_bin_crps(da_true[var], da_fc[var], da_fc[var].bin_edges)
+            das.append(xr.DataArray(
+                result, dims=dims, coords=dict(da_true.coords), name=var
+            ))
+        crps = xr.merge(das)
+    else:
+#         result = compute_bin_crps(da_true, da_fc, da_fc.bin_edges)
+        result = compute_bin_crps_da(da_true, da_fc)
+        crps = xr.DataArray(
+            result, dims=dims, coords=dict(da_true.coords), name=da_fc.name
+        )
+    crps = (crps * weights_lat).mean(mean_dims)
+    return crps

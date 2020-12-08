@@ -1,0 +1,5 @@
+savedir: /data/stephan/WeatherBench/TFR/era_5.625_1979_2015/
+datadir: /data/stephan/WeatherBench/5.625deg/
+var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperature': ('t', [50, 250, 500, 600, 700, 850, 925]), 'u_component_of_wind': ('u', [50, 250, 500, 600, 700, 850, 925]), 'v_component_of_wind': ('v', [50, 250, 500, 600, 700, 850, 925]), 'specific_humidity': ('q', [50, 250, 500, 600, 700, 850, 925]), 'constants': ['lsm','orography','lat2d']}
+norm_subsample: 30000
+years: [1979, 2015]

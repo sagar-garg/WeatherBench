@@ -1,0 +1,9 @@
+datadir: /data/stephan/WeatherBench/CMIP/MPI-ESM
+name: toa_incident_solar_radiation
+cmip_name: rsdt
+era_name: tisr
+output_type: E3hr
+run: r1i1p1f1
+res:
+  - 2.8125
+  - 5.625
