@@ -1,0 +1,19 @@
+name: weatherbench_3
+channels:
+  - conda-forge
+dependencies:
+  - python=3.6
+  - xarray
+  - netcdf4
+  - dask
+  - xesmf
+  - fire
+  - numpy
+  - matplotlib
+  - seaborn
+  - configargparse
+  - notebook
+  - xskillscore
+  - pip:
+      - cdsapi
+      - tensorflow-gpu
