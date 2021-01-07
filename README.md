@@ -1,3 +1,3 @@
 # WeatherBench: A benchmark dataset for data-driven weather forecasting
 
-WARNING: This is my fork. Please go to https://github.com/pangeo-data/WeatherBench for the official repo.
+My master thesis work. Probabilistic Weather Prediction using ML. Paper in draft.
