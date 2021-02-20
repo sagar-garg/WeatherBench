@@ -14,7 +14,7 @@ min_es_delta: 0.0001
 data_subsample: 1
 norm_subsample: 30000
 bn_position: post
-dropout: 0.0
+dropout: 0.1
 l2: 1e-5
 activation: leakyrelu
 nt: 3
@@ -26,9 +26,9 @@ tp_log: 0.001
 discard_first: 24
 # tfr_out_idxs: [0, 1, 2]
 # predict_difference: 1
-# is_categorical: 1
+is_categorical: 1
 bin_min: 0
-bin_max: 3
+bin_max: 8
 num_bins: 50
 
 # train_tfr_files: /data/stephan/WeatherBench/TFR/004-era_all/train/*.tfrecord

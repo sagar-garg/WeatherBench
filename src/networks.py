@@ -319,6 +319,49 @@ def create_lat_crps(lat, n_vars, relu=False):
         return tf.reduce_mean(crps)
     return crps_loss
 
+def gev_cdf_tf(y, mu, sigma, xi):
+    y = (y-mu)/sigma
+    x = 1 + xi * y
+#     x[x < 0] = 0
+    x = tf.where(x<0, 0., x)
+    x = x**(-1/xi)
+    return tf.where(tf.math.is_inf(tf.exp(-x)), 0., tf.exp(-x))
+
+def crps_lcgev_tf(y, mu, sigma, xi, dtype='float32'):
+    SCdSH = sigma/xi
+    Gam1mSH = tf.exp(tf.math.lgamma(1-xi))
+#     print(Gam1mSH)
+    
+    probY = gev_cdf_tf(y, mu, sigma, xi)
+    prob0 = gev_cdf_tf(tf.constant(0., dtype), mu, sigma, xi)
+    
+    igammaY = tf.cast(tf.math.igamma(1-tf.cast(xi, 'float64'), -tf.math.log(tf.cast(probY, 'float64'))), dtype)
+    igamma0 = tf.cast(tf.math.igamma(1-tf.cast(xi, 'float64'), -2 * tf.math.log(tf.cast(prob0, 'float64'))), dtype)
+    
+    T1 = (y-mu) * (2*probY-1) + mu * prob0**2
+    T2 = SCdSH * ( 1-prob0**2 - 2**xi*Gam1mSH*igamma0)
+    T3 = -2*SCdSH * ( 1-probY - Gam1mSH*igammaY)
+#     print(T1, T2, T3)
+    return T1 + T2 + T3
+
+
+def create_lat_crps_lcgev(lat, n_vars):
+    weights_lat = np.cos(np.deg2rad(lat)).values
+    weights_lat /= weights_lat.mean()
+    def crps_lcgev_loss(y_true, y_pred):
+        mu, sigma, xi = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
+        sigma = tf.nn.relu(sigma)
+        # Make sure xi isn't 0
+    #     eps = 1e-7
+    #     xi = tf.where(tf.abs(xi)<eps, eps, xi)
+    #     # Keep xi in bounds
+        xi = tf.clip_by_value(xi, -0.278, 0.999)
+        # import pdb
+        # pdb.set_trace()
+        return crps_lcgev_tf(y_true[..., 0], mu, sigma, xi) * weights_lat[None, : , None]
+    return crps_lcgev_loss
+
+
 def create_lat_crps_mae(lat, n_vars, beta=1.):
     weights_lat = np.cos(np.deg2rad(lat)).values
     weights_lat /= weights_lat.mean()

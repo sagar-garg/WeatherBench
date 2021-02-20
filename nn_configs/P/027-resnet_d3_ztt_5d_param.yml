@@ -1,4 +1,4 @@
-exp_id: 005-resnet_d3_ztt_3d_param
+exp_id: 027-resnet_d3_ztt_5d_param
 datadir: /data/stephan/WeatherBench/5.625deg/
 model_save_dir: /home/rasp/data/myWeatherBench/predictions_P/saved_models/
 pred_save_dir: /home/rasp/data/myWeatherBench/predictions_P/
@@ -6,7 +6,7 @@ var_dict: {'geopotential': ('z', [50, 250, 500, 600, 700, 850, 925]), 'temperatu
 output_vars: [z_500, t_850, t2m]
 filters: [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 6]
 kernels: [7, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
-lead_time: 72
+lead_time: 120
 lr: 0.5e-4
 early_stopping_patience: 5
 reduce_lr_patience: 2
